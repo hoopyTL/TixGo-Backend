@@ -4,15 +4,33 @@
   "private": "true",
   "main": "server.js",
   "scripts": {
-    "test": "mocha --exit tests/*",
-    "start": "node server.js"
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts"
   },
   "license": "MIT",
   "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.1.0",
     "mocha": "^10.2.0",
-    "supertest": "^6.3.4"
+    "supertest": "^6.3.4",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^6.0.3"
   },
   "dependencies": {
-    "express": "^4.18.2"
-  }
+    "express": "^4.22.2"
+  },
+  "description": "This project is based on a GitLab [Project Template](https://docs.gitlab.com/ee/user/project/#create-a-project-from-a-built-in-template).",
+  "directories": {
+    "test": "tests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hoopyTL/tixgo-backend.git"
+  },
+  "keywords": [],
+  "author": "",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/hoopyTL/tixgo-backend/issues"
+  },
+  "homepage": "https://github.com/hoopyTL/tixgo-backend#readme"
 }
