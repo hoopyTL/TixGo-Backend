@@ -1,5 +1,6 @@
 import express from "express";
 import { Request, Response } from "express";
+import { db } from "./configs/db";
 
 const app = express();
 app.use(express.json());
@@ -19,22 +20,25 @@ interface Event {
   totalTickets: number;
 }
 
-const events: Event[] = [];
-app.get("/events", (req: Request, res: Response) => {
-  res.json(events);
+app.get("/events", async (req: Request, res: Response) => {
+  try {
+    const events = await db.event.findMany();
+    res.json(events);
+  } catch (error) {
+    res.status(500).json({ error: "Không thể lấy danh sách sự kiện" });
+  }
 });
 
-app.post("/events", (req: Request, res: Response) => {
-  const { title, price, totalTickets } = req.body;
+app.post("/events", async (req: Request, res: Response) => {
+  try {
+    const { title, price, totalTickets } = req.body;
 
-  const newEvent: Event = {
-    id: Date.now().toString(),
-    title,
-    price,
-    totalTickets,
-  };
+    const newEvent: Event = await db.event.create({
+      data: { title, price: Number(price), totalTickets: Number(totalTickets) },
+    });
 
-  events.push(newEvent);
-
-  res.status(201).json(newEvent);
+    res.status(201).json(newEvent);
+  } catch (error) {
+    res.status(500).json({ error: "Không thể tạo sự kiện" });
+  }
 });
