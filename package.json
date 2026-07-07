@@ -4,7 +4,7 @@
   "private": "true",
   "main": "server.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts"
+    "dev": "ts-node-dev -r dotenv/config --respawn --transpile-only src/index.ts"
   },
   "license": "MIT",
   "devDependencies": {
