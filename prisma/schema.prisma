@@ -10,6 +10,7 @@ model Event {
   id           String   @id @default(uuid())
   title        String
   description  String?
+  location     String?
   totalTickets Int      @map("total_tickets")
   price        Float
   createdAt    DateTime @default(now()) @map("created_at")
