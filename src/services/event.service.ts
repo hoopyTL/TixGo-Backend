@@ -7,6 +7,11 @@ export const EventService = {
     },
 
     createEvent: async (data: CreateEventInput) => {
-        return db.event.create({ data });
+        return db.event.create({
+            data: {
+                ...data,
+                remainTickets: data.remainTickets ?? data.totalTickets,
+            },
+        });
     },
 };
