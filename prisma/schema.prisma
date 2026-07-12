@@ -27,6 +27,7 @@ model User {
   role         String    @default("buyer")
   createdAt    DateTime  @default(now()) @map("created_at")
   bookings     Booking[] 
+  idempotencies Idempotency[]
 
   @@map("users")
 }
@@ -42,4 +43,20 @@ model Booking {
   event     Event    @relation(fields: [eventId], references: [id])
 
   @@map("bookings")
+}
+
+model Idempotency {
+  key            String    @id                     // Idempotency-Key nhận từ Header
+  userId         String    @map("user_id")         // Cô lập theo User
+  requestHash    String    @map("request_hash")    // Tránh payload mismatch
+  status         String    @default("PROCESSING")  // PROCESSING | COMPLETED
+  responseStatus Int?      @map("response_status") // HTTP code 
+  responseBody   String?   @map("response_body")   // JSON response 
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  user           User      @relation(fields: [userId], references: [id])
+
+  @@unique([userId, key])                          
+  @@map("idempotency_keys")
 }
