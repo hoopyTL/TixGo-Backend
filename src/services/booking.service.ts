@@ -12,6 +12,13 @@ export const BookingService = {
 
     // 1. Chạy Prisma transaction toàn bộ để lock hàng đợi và key
     return db.$transaction(async (tx) => {
+      // Serialize retries before checking the key; the lock is released on commit/rollback.
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtextextended(${JSON.stringify([userId, idempotencyKey])}, 0)
+        )::text
+      `;
+
       const existingKey = await tx.idempotency.findUnique({
         where: {
           userId_key: { userId, key: idempotencyKey },
