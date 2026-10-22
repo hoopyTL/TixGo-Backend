@@ -1,31 +1,18 @@
 #!/bin/bash
+set -euo pipefail
 
-# Kiểm tra tham số đầu vào
-if [ -z "$1" ] || [ -z "$2" ]; then
-  echo "Cách dùng: ./tests/race-condition.sh <EVENT_ID> <JWT_TOKEN>"
-  echo "Ví dụ: ./tests/race-condition.sh 550e8400-e29b-41d4-a716-446655440000 eyJhbGciOi..."
+if [ -z "${1:-}" ] || [ -z "${2:-}" ]; then
+  echo "Cách dùng: ./tests/race-condition.sh <EVENT_ID> <JWT_TOKEN> [REQUEST_COUNT=50]"
+  echo "Lưu ý: tham số thứ hai phải là access token trả về từ /auth/login, không phải JWT_SECRET trong .env."
   exit 1
 fi
 
-EVENT_ID=$1
 TOKEN=$2
-URL="http://localhost:3000/bookings"
+if ! [[ "$TOKEN" =~ ^[^.]+\.[^.]+\.[^.]+$ ]]; then
+  echo "Token không hợp lệ."
+  echo "Hãy truyền access token JWT từ /auth/login, không phải secret như JWT_SECRET."
+  exit 1
+fi
 
-echo "🚀 Bắt đầu bắn 50 request song song đặt vé cho Event: $EVENT_ID..."
-echo "--------------------------------------------------"
-
-# Bắn 50 request song song
-for i in $(seq 1 50); do
-  curl -s -o /dev/null -w "%{http_code}\n" -X POST "$URL" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "{\"eventId\": \"$EVENT_ID\"}" &
-done
-
-# Chờ tất cả tiến trình con hoàn thành
-wait
-
-echo "--------------------------------------------------"
-echo "🎉 Đã bắn xong! Hãy kiểm tra lại:"
-echo "1. Số lượng bản ghi trong bảng 'bookings' của Event này."
-echo "2. Giá trị 'remain_tickets' trong bảng 'events' xem có bị âm không."
+# Each independent purchase receives a unique key; the runner checks inventory.
+node "$(dirname "$0")/api-scenarios.js" race "$1" "$TOKEN" "${3:-50}"
