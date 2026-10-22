@@ -46,7 +46,7 @@ model Booking {
 }
 
 model Idempotency {
-  key            String    @id                     // Idempotency-Key nhận từ Header
+  key            String                            // Idempotency-Key received from the header
   userId         String    @map("user_id")         // Cô lập theo User
   requestHash    String    @map("request_hash")    // Tránh payload mismatch
   status         String    @default("PROCESSING")  // PROCESSING | COMPLETED
@@ -57,6 +57,6 @@ model Idempotency {
 
   user           User      @relation(fields: [userId], references: [id])
 
-  @@unique([userId, key])                          
+  @@id([userId, key])
   @@map("idempotency_keys")
 }
