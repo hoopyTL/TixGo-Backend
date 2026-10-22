@@ -7,23 +7,56 @@ datasource db {
 }
 
 model Event {
-  id           String   @id @default(uuid())
-  title        String
-  description  String?
-  location     String?
-  totalTickets Int      @map("total_tickets")
-  price        Float
-  createdAt    DateTime @default(now()) @map("created_at")
+  id            String    @id @default(uuid())
+  title         String
+  description   String?
+  location      String?
+  totalTickets  Int       @map("total_tickets")   
+  remainTickets Int       @map("remain_tickets")  
+  price         Float
+  createdAt     DateTime  @default(now()) @map("created_at")
+  bookings      Booking[] 
 
   @@map("events")
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String   @map("password_hash")
-  role         String   @default("buyer")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  role         String    @default("buyer")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  bookings     Booking[] 
+  idempotencies Idempotency[]
 
   @@map("users")
+}
+
+model Booking {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  eventId   String   @map("event_id")
+  status    String   @default("CONFIRMED") // CONFIRMED | CANCELLED
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id])
+  event     Event    @relation(fields: [eventId], references: [id])
+
+  @@map("bookings")
+}
+
+model Idempotency {
+  key            String                            // Idempotency-Key received from the header
+  userId         String    @map("user_id")         // Cô lập theo User
+  requestHash    String    @map("request_hash")    // Tránh payload mismatch
+  status         String    @default("PROCESSING")  // PROCESSING | COMPLETED
+  responseStatus Int?      @map("response_status") // HTTP code 
+  responseBody   String?   @map("response_body")   // JSON response 
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  user           User      @relation(fields: [userId], references: [id])
+
+  @@id([userId, key])
+  @@map("idempotency_keys")
 }

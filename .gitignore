@@ -62,5 +62,11 @@ typings/
 
 /src/generated/prisma
 
+dist/
+
 .agents
 docs
+/AGENTS.md
+/DESIGN.md
+/roadmap-update.md
+.DS_Store

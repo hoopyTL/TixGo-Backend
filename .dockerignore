@@ -1,3 +1,13 @@
 node_modules
 npm-debug.log
 dist
+docs
+AGENTS.md
+DESIGN.md
+roadmap-update.md
+.agents
+.git
+.env
+.env.*
+!.env.example
+.DS_Store

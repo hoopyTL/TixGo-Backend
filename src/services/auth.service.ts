@@ -33,7 +33,12 @@ export const AuthService = {
       throw new AppError(401, "Email hoặc mật khẩu không chính xác");
     }
 
-    const accessToken = signToken({ userId: user.id, role: user.role });
+    const role = user.role;
+    if (role !== "buyer" && role !== "organizer" && role !== "admin") {
+      throw new AppError(403, "Vai trò tài khoản không hợp lệ");
+    }
+
+    const accessToken = signToken({ userId: user.id, role });
     return {
       accessToken,
       user: { id: user.id, email: user.email, role: user.role },
