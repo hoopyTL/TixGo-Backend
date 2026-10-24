@@ -48,7 +48,7 @@ Tạo Event cần Bearer token và role organizer/admin hiện hành trong DB. B
 
 Migration mới giữ nguyên owner NULL cho Event lịch sử; Event mới bắt buộc có owner qua trigger DB. FK chặn xóa owner đang được tham chiếu; CHECK chặn sức chứa không dương hoặc tồn ngoài khoảng. Nếu inventory cũ sai, migration dừng và rollback, không tự sửa tồn/booking. Kiểm kê và xử lý ngoại lệ trước khi triển khai; không dùng `db push` để thay migration vì trigger/CHECK nằm trong SQL.
 
-Create không có idempotency: retry sau mất response có thể tạo Event trùng. API quản trị role, claim/transfer và sửa/xóa Event chưa được bổ sung.
+Create không có idempotency: retry sau mất response có thể tạo Event trùng. API quản trị role, claim/transfer và xóa Event chưa được bổ sung. Luồng cập nhật metadata qua `PATCH /events/:id` được mô tả riêng bên dưới.
 
 ## Kiểm tra
 
@@ -67,7 +67,7 @@ docker compose --profile test up -d --wait test-db
 TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55432/tixgo_test npm run test:integration
 ```
 
-Test bắt buộc database có tên kết thúc bằng `_test`, tạo schema ngẫu nhiên, áp dụng migration rồi xóa schema đó sau khi chạy. Không dùng database từ `.env` để kiểm thử integration. Test kiểm tra auth, Event ownership, money, cursor, inventory, replay, mismatch, rollback, key giữa các user và request đồng thời.
+Test bắt buộc database có tên kết thúc bằng `_test`, tạo schema ngẫu nhiên, áp dụng migration rồi xóa schema đó sau khi chạy. Không dùng database từ `.env` để kiểm thử integration. Test kiểm tra auth, current role/ownership, money, cursor, cancellation/rollback, replay, mismatch, key giữa các user và request đồng thời.
 
 Bài thực hành SQL và query plan dùng cùng DB test riêng, tự tạo/xóa schema:
 
@@ -88,6 +88,17 @@ docker compose --profile test stop test-db
 `price` lưu bằng PostgreSQL `NUMERIC(12,2)`, API trả chuỗi như `"100000.00"`. Gửi price dạng chuỗi decimal (tối đa 2 chữ số thập phân); numeric input cũ chỉ được nhận nếu biểu diễn không cần làm tròn. Vượt `9999999999.99`, sub-cent, NaN/Infinity và exponent strings bị từ chối. Migration dừng nếu giá lịch sử không biểu diễn được, không âm thầm round.
 
 `GET /events?limit=50` vẫn trả public array, theo `createdAt DESC, id DESC`; limit1–100, mặc định50. Khi còn trang, đọc header `X-Next-Cursor` rồi gửi `?limit=50&cursor=<value>`; khi hết trang header không có. Owner/account fields vẫn không xuất hiện.
+
+| Endpoint | Quyền hiện hành trong DB |
+| --- | --- |
+| `POST /bookings` | buyer/organizer/admin, buyer identity lấy từ server |
+| `GET /bookings/:id` | booking owner hoặc admin |
+| `PATCH /events/:id` | organizer sở hữu Event hoặc admin; chỉ title/description/location/price |
+| `POST /bookings/:id/cancel` | booking owner hoặc admin, body trống hoặc `{}` |
+
+Object không có quyền/missing trả404; role không hợp lệ403, account bị xóa401. PATCH không nhận owner/capacity/inventory. Organizer không tự claim Event legacy thiếu owner.
+
+Cancel chuyển CONFIRMED→CANCELLED và hoàn1vé trong cùng transaction; retry không hoàn thêm. Create replay bằng key cũ vẫn trả snapshot create gốc (có thể CONFIRMED dù booking hiện đã CANCELLED), không tạo mua mới. Dùng GET booking để đọc trạng thái hiện hành. Cancel không triển khai payment/refund.
 
 ## Kiểm tra thủ công / Postman
 

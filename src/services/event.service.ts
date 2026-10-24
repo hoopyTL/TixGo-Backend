@@ -2,9 +2,10 @@ import { Prisma } from "@prisma/client";
 import { db } from "../configs/db";
 import { AppError } from "../errors/AppError";
 import { CreateEventInput } from "../validators/event.validator";
-import { CatalogQuery } from "../validators/resource.validator";
+import { CatalogQuery, UpdateEventInput } from "../validators/resource.validator";
 import { encodeCatalogCursor } from "../utils/catalog-cursor";
 import { formatPrice } from "../utils/money";
+import { lockCurrentActor } from "./access.service";
 
 // Keep account identifiers and future private fields out of the public catalog.
 const publicEventSelect = {
@@ -81,6 +82,27 @@ export const EventService = {
         select: { ...publicEventSelect, organizerId: true },
       });
       return { ...event, price: formatPrice(event.price) };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  },
+
+  updateEvent: async (actorId: string, eventId: string, data: UpdateEventInput) => {
+    return db.$transaction(async (tx) => {
+      const actor = await lockCurrentActor(tx, actorId);
+      if (actor.role !== "organizer" && actor.role !== "admin") {
+        throw new AppError(403, "Only organizers and admins can update events");
+      }
+      const [event] = await tx.$queryRaw<{ id: string; organizer_id: string | null }[]>`
+        SELECT id, organizer_id FROM events WHERE id = ${eventId} FOR UPDATE
+      `;
+      if (!event || (actor.role !== "admin" && event.organizer_id !== actor.id)) {
+        throw new AppError(404, "Event not found");
+      }
+      const updated = await tx.event.update({
+        where: { id: event.id },
+        data: { title: data.title, description: data.description, location: data.location, price: data.price },
+        select: { ...publicEventSelect, organizerId: true },
+      });
+      return { ...updated, price: formatPrice(updated.price) };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   },
 };

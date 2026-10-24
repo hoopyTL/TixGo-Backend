@@ -676,7 +676,18 @@ describe("Event foundation migration with historical data", () => {
   });
 });
 
-describe("Exact prices and keyset catalog", () => {
+function bookingRequest(method, id, accessToken = token, body) {
+  const req = request(app)[method](`/bookings/${id}${method === "post" ? "/cancel" : ""}`);
+  if (accessToken) req.set("Authorization", `Bearer ${accessToken}`);
+  return body === undefined ? req : req.send(body);
+}
+
+function patchEvent(id, payload, accessToken = organizer.token) {
+  const req = request(app).patch(`/events/${id}`).send(payload);
+  return accessToken ? req.set("Authorization", `Bearer ${accessToken}`) : req;
+}
+
+describe("Exact prices, keyset catalog and object access control", () => {
   it("stores and returns exact two-place decimal prices without Number rounding", async () => {
     for (const [price, expected] of [["0.10", "0.10"], ["123.45", "123.45"], ["9999999999.99", "9999999999.99"], [0.1, "0.10"]]) {
       const res = await postEvent(eventPayload({ price }));
@@ -722,5 +733,152 @@ describe("Exact prices and keyset catalog", () => {
       { cursor: "bad!" }, { cursor: invalidCursor }, { cursor: "" }, { unexpected: 1 }]) {
       assert.equal((await request(app).get("/events").query(query)).status, 400, JSON.stringify(query));
     }
+  });
+  it("reads a real private booking only for its owner or the current admin", async () => {
+    const event = await createEvent();
+    const created = await book(event.id);
+    assert.equal(created.status, 201);
+    const id = created.body.data.id;
+    const other = await registerUser();
+    assert.equal((await bookingRequest("get", id, null)).status, 401);
+    assert.equal((await bookingRequest("get", id, other.token)).status, 404);
+    assert.equal((await bookingRequest("get", id, organizer.token)).status, 404);
+    const own = await bookingRequest("get", id);
+    assert.equal(own.status, 200);
+    assert.deepEqual(own.body.data, created.body.data);
+    assert.equal((await bookingRequest("get", id, administrator.token)).status, 200);
+    assert.equal(await db.booking.count({ where: { id } }), 1, "Denied request targets an existing booking");
+  });
+  it("prevents cross-organizer metadata updates and rejects ownership/inventory changes", async () => {
+    const event = await createEvent();
+    const other = await provisionUser("organizer");
+    const original = await db.event.findUnique({ where: { id: event.id } });
+    assert.equal((await patchEvent(event.id, { title: "Spoof" }, other.token)).status, 404);
+    assert.equal((await patchEvent(event.id, { title: "Spoof" }, token)).status, 403);
+    assert.equal((await patchEvent(event.id, { title: "Spoof" }, null)).status, 401);
+    for (const body of [{ organizerId: other.userId }, { remainTickets: 1 }, { totalTickets: 9 }, {}, { role: "admin" }]) {
+      assert.equal((await patchEvent(event.id, body)).status, 400);
+    }
+    assert.deepEqual(await db.event.findUnique({ where: { id: event.id } }), original);
+    const updated = await patchEvent(event.id, { title: "Owner updated", description: null, location: "Lab", price: "12.34" });
+    assert.equal(updated.status, 200, JSON.stringify(updated.body));
+    assert.equal(updated.body.data.price, "12.34");
+    assert.equal(updated.body.data.organizerId, organizer.userId);
+    assert.equal((await patchEvent(event.id, { title: "Admin updated" }, administrator.token)).status, 200);
+  });
+  it("uses current roles for management and does not let organizers claim legacy events", async () => {
+    const event = await createEvent();
+    await db.user.update({ where: { id: organizer.userId }, data: { role: "buyer" } });
+    try { assert.equal((await patchEvent(event.id, { title: "Old claim" })).status, 403); }
+    finally { await db.user.update({ where: { id: organizer.userId }, data: { role: "organizer" } }); }
+    const legacy = await db.event.findFirst({ where: { organizerId: null } });
+    assert.ok(legacy);
+    assert.equal((await patchEvent(legacy.id, { title: "Claim" })).status, 404);
+    assert.equal((await patchEvent(legacy.id, { title: "Legacy admin edit" }, administrator.token)).status, 200);
+    assert.equal((await db.event.findUnique({ where: { id: legacy.id } })).organizerId, null);
+  });
+  it("denies another user's cancellation without changing booking, key or inventory", async () => {
+    const event = await createEvent();
+    const key = randomUUID();
+    const created = await book(event.id, key);
+    const other = await registerUser();
+    const before = await db.booking.findUnique({ where: { id: created.body.data.id } });
+    const saved = await db.idempotency.findUnique({ where: { userId_key: { userId, key } } });
+    assert.equal((await bookingRequest("post", before.id, null)).status, 401);
+    assert.equal((await bookingRequest("post", before.id, other.token)).status, 404);
+    assert.equal((await bookingRequest("post", before.id, organizer.token)).status, 404);
+    assert.deepEqual(await db.booking.findUnique({ where: { id: before.id } }), before);
+    assert.deepEqual(await db.idempotency.findUnique({ where: { userId_key: { userId, key } } }), saved);
+    assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 2);
+  });
+  it("restores one ticket once under simultaneous cancellation and preserves creation replay", async () => {
+    const event = await createEvent(1);
+    const key = randomUUID();
+    const created = await book(event.id, key);
+    const id = created.body.data.id;
+    const responses = await Promise.all(Array.from({ length: 8 }, () => bookingRequest("post", id)));
+    assert.ok(responses.every((res) => res.status === 200), JSON.stringify(responses.map((res) => res.status)));
+    assert.ok(responses.every((res) => res.body.data.status === "CANCELLED"));
+    assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 1);
+    const replay = await book(event.id, key);
+    assert.equal(replay.status, 200);
+    assert.deepEqual(replay.body, created.body, "Creation retry remains the original cached operation snapshot");
+    assert.equal((await bookingRequest("get", id)).body.data.status, "CANCELLED");
+    assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 1);
+    assert.equal((await book(event.id)).status, 201);
+    assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 0);
+  });
+  it("allows admin cancellation but immediately loses that access after demotion", async () => {
+    const event = await createEvent();
+    const created = await book(event.id);
+    const id = created.body.data.id;
+    await db.user.update({ where: { id: administrator.userId }, data: { role: "organizer" } });
+    try {
+      assert.equal((await bookingRequest("get", id, administrator.token)).status, 404);
+      assert.equal((await bookingRequest("post", id, administrator.token)).status, 404);
+    } finally { await db.user.update({ where: { id: administrator.userId }, data: { role: "admin" } }); }
+    const res = await bookingRequest("post", id, administrator.token);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.status, "CANCELLED");
+    assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 3);
+  });
+  it("rolls back cancellation and its stock restoration when the inventory write fails", async () => {
+    const event = await createEvent(1);
+    const created = await book(event.id);
+    const id = created.body.data.id;
+    await installInventoryFailure(event.id);
+    try {
+      assert.equal((await bookingRequest("post", id)).status, 500);
+      assert.equal((await db.booking.findUnique({ where: { id } })).status, "CONFIRMED");
+      assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 0);
+    } finally { await removeInventoryFailure(); }
+    assert.equal((await bookingRequest("post", id)).status, 200);
+    assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 1);
+  });
+  it("rejects inconsistent stock and unsupported booking states without silent repairs", async () => {
+    const event = await createEvent(1);
+    const created = await book(event.id);
+    const id = created.body.data.id;
+    await db.event.update({ where: { id: event.id }, data: { remainTickets: 1 } });
+    assert.equal((await bookingRequest("post", id)).status, 409);
+    assert.equal((await db.booking.findUnique({ where: { id } })).status, "CONFIRMED");
+    assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 1);
+    await db.event.update({ where: { id: event.id }, data: { remainTickets: 0 } });
+    await db.booking.update({ where: { id }, data: { status: "UNSUPPORTED" } });
+    assert.equal((await bookingRequest("post", id)).status, 409);
+    assert.equal((await db.booking.findUnique({ where: { id } })).status, "UNSUPPORTED");
+    assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 0);
+    assert.equal((await patchEvent("invalid", { title: "Invalid ID" })).status, 400);
+    assert.equal((await patchEvent(randomUUID(), { title: "Missing event" })).status, 404);
+  });
+  it("serializes cancellation against a new purchase without losing or inventing tickets", async () => {
+    const event = await createEvent(1);
+    const created = await book(event.id);
+    const [cancel, purchase] = await Promise.all([bookingRequest("post", created.body.data.id), book(event.id)]);
+    assert.equal(cancel.status, 200);
+    assert.ok([201, 409].includes(purchase.status));
+    const remaining = (await db.event.findUnique({ where: { id: event.id } })).remainTickets;
+    const confirmed = await db.booking.count({ where: { eventId: event.id, status: "CONFIRMED" } });
+    assert.equal(remaining + confirmed, 1);
+    assert.equal((await db.booking.findUnique({ where: { id: created.body.data.id } })).status, "CANCELLED");
+  });
+  it("rejects unsupported/deleted actors, invalid IDs and cancellation payload injection", async () => {
+    const event = await createEvent();
+    const created = await book(event.id);
+    const id = created.body.data.id;
+    const actor = await registerUser();
+    await db.user.update({ where: { id: actor.userId }, data: { role: "unsupported" } });
+    assert.equal((await book(event.id, randomUUID(), actor.token)).status, 403);
+    assert.equal((await bookingRequest("get", id, actor.token)).status, 403);
+    assert.equal((await bookingRequest("post", id, actor.token)).status, 403);
+    await db.user.delete({ where: { id: actor.userId } });
+    assert.equal((await book(event.id, randomUUID(), actor.token)).status, 401);
+    assert.equal((await bookingRequest("get", id, actor.token)).status, 401);
+    assert.equal((await bookingRequest("post", id, actor.token)).status, 401);
+    assert.equal((await bookingRequest("get", "invalid")).status, 400);
+    assert.equal((await bookingRequest("post", "invalid")).status, 400);
+    assert.equal((await bookingRequest("post", randomUUID())).status, 404);
+    assert.equal((await bookingRequest("post", id, token, { userId: organizer.userId })).status, 400);
+    assert.equal((await db.booking.findUnique({ where: { id } })).status, "CONFIRMED");
   });
 });
