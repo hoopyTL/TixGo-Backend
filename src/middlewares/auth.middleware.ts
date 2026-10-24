@@ -19,6 +19,9 @@ export const authenticate = (
 
   try {
     const decodedPayload = verifyToken(token);
+    if (typeof decodedPayload.userId !== "string" || !decodedPayload.userId.trim()) {
+      throw new Error("Token is missing a valid user identity");
+    }
     req.user = decodedPayload;
     next();
   } catch (error) {

@@ -15,8 +15,11 @@ model Event {
   remainTickets Int       @map("remain_tickets")  
   price         Float
   createdAt     DateTime  @default(now()) @map("created_at")
+  organizerId   String?   @map("organizer_id")
+  organizer     User?     @relation(fields: [organizerId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   bookings      Booking[] 
 
+  @@index([organizerId])
   @@map("events")
 }
 
@@ -28,6 +31,7 @@ model User {
   createdAt    DateTime  @default(now()) @map("created_at")
   bookings     Booking[] 
   idempotencies Idempotency[]
+  events       Event[]
 
   @@map("users")
 }

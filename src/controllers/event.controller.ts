@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { EventService } from "../services/event.service";
 import { CreateEventInput } from "../validators/event.validator";
+import { AppError } from "../errors/AppError";
 
 export const EventController = {
   getAllEvents: async (req: Request, res: Response) => {
@@ -16,11 +17,14 @@ export const EventController = {
   createEvent: async (req: Request, res: Response) => {
     try {
       const eventData = req.body as CreateEventInput;
-      const result = await EventService.createEvent(eventData);
+      const result = await EventService.createEvent(req.user!.userId, eventData);
       res
         .status(201)
         .json({ message: "Tạo sự kiện mới thành công", data: result });
     } catch (error) {
+      if (error instanceof AppError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error("Lỗi Controller createEvent", error);
       res.status(500).json({ error: "Không thể tạo sự kiện mới" });
     }
