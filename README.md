@@ -67,7 +67,7 @@ docker compose --profile test up -d --wait test-db
 TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55432/tixgo_test npm run test:integration
 ```
 
-Test bắt buộc database có tên kết thúc bằng `_test`, tạo schema ngẫu nhiên, áp dụng migration rồi xóa schema đó sau khi chạy. Không dùng database từ `.env` để kiểm thử integration. Test kiểm tra auth, current role/ownership, money, cursor, cancellation/rollback, replay, mismatch, key giữa các user và request đồng thời.
+Test bắt buộc database có tên kết thúc bằng `_test`, tạo schema ngẫu nhiên, áp dụng migration rồi xóa schema đó sau khi chạy. Không dùng database từ `.env` để kiểm thử integration. Test kiểm tra auth, current role/ownership, money, cursor, cancellation/rollback, replay, mismatch, key giữa các user và request đồng thời. Login limiter có thêm HTTP tests không cần DB.
 
 Bài thực hành SQL và query plan dùng cùng DB test riêng, tự tạo/xóa schema:
 
@@ -99,6 +99,8 @@ docker compose --profile test stop test-db
 Object không có quyền/missing trả404; role không hợp lệ403, account bị xóa401. PATCH không nhận owner/capacity/inventory. Organizer không tự claim Event legacy thiếu owner.
 
 Cancel chuyển CONFIRMED→CANCELLED và hoàn1vé trong cùng transaction; retry không hoàn thêm. Create replay bằng key cũ vẫn trả snapshot create gốc (có thể CONFIRMED dù booking hiện đã CANCELLED), không tạo mua mới. Dùng GET booking để đọc trạng thái hiện hành. Cancel không triển khai payment/refund.
+
+`POST /auth/login` giới hạn5 attempts/(IP,email trim/lowercase),100/IP trong15phút; tính cả success và payload validation-invalid. Vượt giới hạn trả429 và `Retry-After`. Trust proxy mặc định false; không dùng forwarded IP do client tự khai. Store bounded/TTL trong một process, reset khi restart; multi-instance cần shared store. JSON parser từ chối malformed JSON trước router nên loại request đó không đi vào limiter.
 
 ## Kiểm tra thủ công / Postman
 

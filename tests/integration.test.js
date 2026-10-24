@@ -881,4 +881,16 @@ describe("Exact prices, keyset catalog and object access control", () => {
     assert.equal((await bookingRequest("post", id, token, { userId: organizer.userId })).status, 400);
     assert.equal((await db.booking.findUnique({ where: { id } })).status, "CONFIRMED");
   });
+  it("blocks actual password checks after five login attempts, even with a valid password", async () => {
+    const email = `rate-${randomUUID()}@example.com`;
+    assert.equal((await request(app).post("/auth/register").send({ email, password })).status, 201);
+    for (let i = 0; i < 5; i++) {
+      const res = await request(app).post("/auth/login").send({ email: i % 2 ? email.toUpperCase() : email, password: "wrong-password" });
+      assert.equal(res.status, 401);
+    }
+    const blocked = await request(app).post("/auth/login").set("X-Forwarded-For", "203.0.113.99").send({ email, password });
+    assert.equal(blocked.status, 429);
+    assert.ok(Number(blocked.headers["retry-after"]) > 0);
+    assert.equal(blocked.body.data, undefined);
+  });
 });
