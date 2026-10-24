@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { PriceSchema } from '../utils/money'
 
 export const CreateEventSchema = z.object({
     title: z.string().min(1, 'Không được để trống'),
@@ -7,7 +8,7 @@ export const CreateEventSchema = z.object({
     // PostgreSQL INTEGER representation limit, not a business capacity cap.
     totalTickets: z.number().int().positive().max(2147483647),
     organizerId: z.string().uuid().optional(),
-    price: z.number().min(0, "Price cannot be negative")
+    price: PriceSchema
 }).strict()
 
 export type CreateEventInput = z.infer<typeof CreateEventSchema>

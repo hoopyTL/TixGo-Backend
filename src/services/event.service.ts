@@ -2,6 +2,9 @@ import { Prisma } from "@prisma/client";
 import { db } from "../configs/db";
 import { AppError } from "../errors/AppError";
 import { CreateEventInput } from "../validators/event.validator";
+import { CatalogQuery } from "../validators/resource.validator";
+import { encodeCatalogCursor } from "../utils/catalog-cursor";
+import { formatPrice } from "../utils/money";
 
 // Keep account identifiers and future private fields out of the public catalog.
 const publicEventSelect = {
@@ -16,7 +19,24 @@ const publicEventSelect = {
 } satisfies Prisma.EventSelect;
 
 export const EventService = {
-  getAllEvents: async () => db.event.findMany({ select: publicEventSelect }),
+  getAllEvents: async ({ limit = 50, cursor }: CatalogQuery = { limit: 50, cursor: undefined }) => {
+    const cursorFilter = cursor
+      ? Prisma.sql`WHERE (created_at, id) < (${cursor.createdAt}, ${cursor.id})`
+      : Prisma.empty;
+    const events = await db.$queryRaw<Prisma.EventGetPayload<{ select: typeof publicEventSelect }>[]>`
+      SELECT id, title, description, location,
+             total_tickets AS "totalTickets", remain_tickets AS "remainTickets",
+             price, created_at AS "createdAt"
+      FROM events ${cursorFilter}
+      ORDER BY created_at DESC, id DESC LIMIT ${limit + 1}
+    `;
+    const visible = events.slice(0, limit);
+    const last = visible[visible.length - 1];
+    return {
+      events: visible.map((event) => ({ ...event, price: formatPrice(event.price) })),
+      nextCursor: events.length > limit && last ? encodeCatalogCursor(last) : undefined,
+    };
+  },
 
   createEvent: async (actorId: string, data: CreateEventInput) => {
     return db.$transaction(async (tx) => {
@@ -60,7 +80,7 @@ export const EventService = {
         },
         select: { ...publicEventSelect, organizerId: true },
       });
-      return event;
+      return { ...event, price: formatPrice(event.price) };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   },
 };

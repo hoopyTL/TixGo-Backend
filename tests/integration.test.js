@@ -675,3 +675,52 @@ describe("Event foundation migration with historical data", () => {
     await checkEventFoundationMigration(true);
   });
 });
+
+describe("Exact prices and keyset catalog", () => {
+  it("stores and returns exact two-place decimal prices without Number rounding", async () => {
+    for (const [price, expected] of [["0.10", "0.10"], ["123.45", "123.45"], ["9999999999.99", "9999999999.99"], [0.1, "0.10"]]) {
+      const res = await postEvent(eventPayload({ price }));
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      assert.equal(res.body.data.price, expected);
+      assert.equal((await db.event.findUnique({ where: { id: res.body.data.id } })).price.toFixed(2), expected);
+    }
+    const before = await db.event.count();
+    for (const price of ["0.001", "-1.00", "10000000000.00", "1e2", "01.00", "NaN", "Infinity", "1.00\n", " 1.00", "1.00 ", 0.1 + 0.2, null]) {
+      assert.equal((await postEvent(eventPayload({ price }))).status, 400, String(price));
+    }
+    assert.equal(await db.event.count(), before);
+  });
+  it("paginates tied creation times without duplicates or missing fixture events", async () => {
+    const ids = [];
+    for (let i = 0; i < 7; i++) ids.push((await createEvent()).id);
+    const tied = new Date("2090-01-01T00:00:00.123Z");
+    await db.event.updateMany({ where: { id: { in: ids } }, data: { createdAt: tied } });
+    const expected = [...ids].sort().reverse();
+    const seen = [];
+    let cursor;
+    for (let i = 0; i < 4; i++) {
+      let req = request(app).get("/events").query({ limit: 2 });
+      if (cursor) req = req.query({ cursor });
+      const page = await req;
+      assert.equal(page.status, 200);
+      assert.ok(page.body.length <= 2);
+      for (const row of page.body) {
+        assert.equal(row.organizerId, undefined);
+        if (ids.includes(row.id)) seen.push(row.id);
+      }
+      cursor = page.headers["x-next-cursor"];
+      assert.ok(cursor, "More rows exist after the tied fixtures");
+    }
+    assert.deepEqual(seen, expected);
+    assert.equal(new Set(seen).size, ids.length);
+    // Keep unrelated catalog assertions independent of these future-dated fixtures.
+    await db.event.updateMany({ where: { id: { in: ids } }, data: { createdAt: new Date() } });
+  });
+  it("rejects malformed catalog limits and cursor payloads before database queries", async () => {
+    const invalidCursor = Buffer.from(JSON.stringify({ createdAt: "2090-02-30T00:00:00.000Z", id: randomUUID() })).toString("base64url");
+    for (const query of [{ limit: 0 }, { limit: 101 }, { limit: "2.5" }, { limit: "-1" },
+      { cursor: "bad!" }, { cursor: invalidCursor }, { cursor: "" }, { unexpected: 1 }]) {
+      assert.equal((await request(app).get("/events").query(query)).status, 400, JSON.stringify(query));
+    }
+  });
+});

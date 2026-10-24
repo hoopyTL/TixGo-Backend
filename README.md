@@ -67,13 +67,27 @@ docker compose --profile test up -d --wait test-db
 TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55432/tixgo_test npm run test:integration
 ```
 
-Test bắt buộc database có tên kết thúc bằng `_test`, tạo schema ngẫu nhiên, áp dụng migration rồi xóa schema đó sau khi chạy. Không dùng database từ `.env` để kiểm thử integration. Test kiểm tra auth, Event ownership, inventory, replay, mismatch, rollback, key giữa các user và request đồng thời.
+Test bắt buộc database có tên kết thúc bằng `_test`, tạo schema ngẫu nhiên, áp dụng migration rồi xóa schema đó sau khi chạy. Không dùng database từ `.env` để kiểm thử integration. Test kiểm tra auth, Event ownership, money, cursor, inventory, replay, mismatch, rollback, key giữa các user và request đồng thời.
+
+Bài thực hành SQL và query plan dùng cùng DB test riêng, tự tạo/xóa schema:
+
+```bash
+TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55432/tixgo_test npm run test:sql
+```
+
+Script kiểm chứng money migration, JOIN/FK/unique/CHECK và seed 50.000 Event để so EXPLAIN ANALYZE trước/sau index. `SQL_EVIDENCE_DIR` tùy chọn lưu JSON plans vào thư mục local.
 
 Dừng database kiểm thử sau khi dùng:
 
 ```bash
 docker compose --profile test stop test-db
 ```
+
+## Giá, catalog và quyền trên tài nguyên
+
+`price` lưu bằng PostgreSQL `NUMERIC(12,2)`, API trả chuỗi như `"100000.00"`. Gửi price dạng chuỗi decimal (tối đa 2 chữ số thập phân); numeric input cũ chỉ được nhận nếu biểu diễn không cần làm tròn. Vượt `9999999999.99`, sub-cent, NaN/Infinity và exponent strings bị từ chối. Migration dừng nếu giá lịch sử không biểu diễn được, không âm thầm round.
+
+`GET /events?limit=50` vẫn trả public array, theo `createdAt DESC, id DESC`; limit1–100, mặc định50. Khi còn trang, đọc header `X-Next-Cursor` rồi gửi `?limit=50&cursor=<value>`; khi hết trang header không có. Owner/account fields vẫn không xuất hiện.
 
 ## Kiểm tra thủ công / Postman
 
