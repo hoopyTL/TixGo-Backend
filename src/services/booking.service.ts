@@ -1,8 +1,62 @@
+import { Prisma } from "@prisma/client";
 import { db } from "../configs/db";
 import { AppError } from "../errors/AppError";
 import { generateRequestHash } from "../utils/hash";
+import { lockCurrentActor } from "./access.service";
+
+const bookingSelect = {
+  id: true, userId: true, eventId: true, status: true, createdAt: true,
+} satisfies Prisma.BookingSelect;
 
 export const BookingService = {
+  getBooking: async (actorId: string, bookingId: string) => {
+    return db.$transaction(async (tx) => {
+      const actor = await lockCurrentActor(tx, actorId);
+      const booking = await tx.booking.findFirst({
+        where: { id: bookingId, ...(actor.role === "admin" ? {} : { userId: actor.id }) },
+        select: bookingSelect,
+      });
+      if (!booking) throw new AppError(404, "Booking not found");
+      return booking;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  },
+
+  cancelBooking: async (actorId: string, bookingId: string) => {
+    return db.$transaction(async (tx) => {
+      const actor = await lockCurrentActor(tx, actorId);
+      const target = await tx.booking.findFirst({
+        where: { id: bookingId, ...(actor.role === "admin" ? {} : { userId: actor.id }) },
+        select: { eventId: true },
+      });
+      if (!target) throw new AppError(404, "Booking not found");
+
+      // Use the same Event-first order as booking creation before locking a booking.
+      const [event] = await tx.$queryRaw<{ id: string; total_tickets: number; remain_tickets: number }[]>`
+        SELECT id, total_tickets, remain_tickets FROM events WHERE id = ${target.eventId} FOR UPDATE
+      `;
+      const [booking] = await tx.$queryRaw<{ id: string; user_id: string; event_id: string; status: string }[]>`
+        SELECT id, user_id, event_id, status FROM bookings WHERE id = ${bookingId} FOR UPDATE
+      `;
+      if (!booking || (actor.role !== "admin" && booking.user_id !== actor.id)) {
+        throw new AppError(404, "Booking not found");
+      }
+      if (!event || booking.event_id !== event.id) {
+        throw new AppError(409, "Booking changed during cancellation");
+      }
+      if (booking.status === "CANCELLED") {
+        return tx.booking.findUniqueOrThrow({ where: { id: booking.id }, select: bookingSelect });
+      }
+      if (booking.status !== "CONFIRMED") throw new AppError(409, "Booking cannot be cancelled");
+      if (event.remain_tickets < 0 || event.remain_tickets >= event.total_tickets) {
+        throw new AppError(409, "Inventory cannot be restored within event capacity");
+      }
+      const cancelled = await tx.booking.update({
+        where: { id: booking.id }, data: { status: "CANCELLED" }, select: bookingSelect,
+      });
+      await tx.event.update({ where: { id: event.id }, data: { remainTickets: { increment: 1 } } });
+      return cancelled;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  },
   createBooking: async (userId: string, eventId: string, idempotencyKey?: string) => {
     if (!idempotencyKey) {
       throw new AppError(400, "Missing idempotency key");
@@ -12,6 +66,8 @@ export const BookingService = {
 
     // 1. Chạy Prisma transaction toàn bộ để lock hàng đợi và key
     return db.$transaction(async (tx) => {
+      // Lock order: current user, request key, Event, then Booking.
+      await lockCurrentActor(tx, userId);
       // Serialize retries before checking the key; the lock is released on commit/rollback.
       await tx.$queryRaw`
         SELECT pg_advisory_xact_lock(
