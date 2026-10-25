@@ -81,6 +81,10 @@ export const EventService = {
         },
         select: { ...publicEventSelect, organizerId: true },
       });
+      await tx.$executeRaw`
+        INSERT INTO seats(id,event_id,number)
+        SELECT gen_random_uuid()::text,${event.id},n FROM generate_series(1,${event.totalTickets}) n
+      `;
       return { ...event, price: formatPrice(event.price) };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   },

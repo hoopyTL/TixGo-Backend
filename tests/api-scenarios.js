@@ -17,10 +17,29 @@ async function getEvent() {
   return event;
 }
 
-function book(key, requestedEventId = eventId) {
+const purchaseInputs = new Map();
+let seatOffset = 0;
+let availableSeats;
+async function book(key, requestedEventId = eventId) {
+  let input = purchaseInputs.get(key);
+  if (!input) {
+    if (!availableSeats) {
+      const seats = await api(`/events/${eventId}/seats`);
+      assert.equal(seats.status, 200);
+      availableSeats = seats.body.data.filter((seat) => seat.status === "AVAILABLE");
+    }
+    const seat = availableSeats[seatOffset++ % availableSeats.length];
+    assert.ok(seat, "No available seat fixture");
+    input = { eventId, seatId: seat.id, reservationId: randomUUID() };
+    purchaseInputs.set(key, input);
+    const hold = await api("/bookings/hold", { method: "POST", headers: {
+      Authorization: `Bearer ${token}`, "Content-Type": "application/json",
+    }, body: JSON.stringify(input) });
+    if (![200, 201].includes(hold.status)) return hold;
+  }
   return api("/bookings", { method: "POST", headers: {
     Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Idempotency-Key": key,
-  }, body: JSON.stringify({ eventId: requestedEventId }) });
+  }, body: JSON.stringify({ ...input, eventId: requestedEventId }) });
 }
 
 async function testIdempotency(before) {
@@ -41,6 +60,9 @@ async function testIdempotency(before) {
 async function testRace(before) {
   const count = Number(configuredCount);
   assert.ok(Number.isInteger(count) && count > 0 && count <= 200, "Request count must be an integer from 1 to 200");
+  const seats = await api(`/events/${eventId}/seats`);
+  assert.equal(seats.status, 200);
+  availableSeats = seats.body.data.filter((seat) => seat.status === "AVAILABLE");
   const results = await Promise.all(Array.from({ length: count }, () => book(randomUUID())));
   const created = results.filter((result) => result.status === 201);
   const soldOut = results.filter((result) => result.status === 409);

@@ -70,7 +70,11 @@ async function main() {
       FROM generate_series(1,50000) AS source(n)`, [organizer]);
     const ids = [1, 2].map((n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`);
     for (const id of ids) {
-      await client.query("INSERT INTO bookings(id,user_id,event_id) VALUES($1,$2,$3)", [randomUUID(), buyer, id]);
+      const seatId = randomUUID();
+      const reservationId = randomUUID();
+      await client.query("INSERT INTO seats(id,event_id,number) VALUES($1,$2,1)", [seatId,id]);
+      await client.query("INSERT INTO reservations(id,user_id,event_id,seat_id,status,expires_at,updated_at) VALUES($1,$2,$3,$4,'CONFIRMED',NOW()+interval '300 seconds',NOW())", [reservationId,buyer,id,seatId]);
+      await client.query("INSERT INTO bookings(id,user_id,event_id,seat_id,reservation_id) VALUES($1,$2,$3,$4,$5)", [randomUUID(),buyer,id,seatId,reservationId]);
       await client.query("UPDATE events SET remain_tickets=99 WHERE id=$1", [id]);
     }
     const joined = await client.query(`SELECT b.id AS booking_id, b.user_id AS buyer_id, e.id AS event_id,
@@ -88,7 +92,7 @@ async function main() {
     assert.equal(money.sum, "246.90");
 
     await assert.rejects(() => client.query("INSERT INTO users(id,email,password_hash) VALUES($1,$2,'duplicate')", [randomUUID(), `${buyer}@example.com`]), { code: "23505" });
-    await assert.rejects(() => client.query("INSERT INTO bookings(id,user_id,event_id) VALUES($1,$2,$3)", [randomUUID(), randomUUID(), ids[0]]), { code: "23503" });
+    await assert.rejects(() => client.query("INSERT INTO bookings(id,user_id,event_id,seat_id,reservation_id) VALUES($1,$2,$3,$4,$5)", [randomUUID(), randomUUID(), ids[0], randomUUID(), randomUUID()]), { code: "23503" });
     for (const update of ["total_tickets=0", "remain_tickets=-1", "remain_tickets=101", "price=-0.01", "price='NaN'::numeric"]) {
       await assert.rejects(() => client.query(`UPDATE events SET ${update} WHERE id=$1`, [ids[0]]), { code: "23514" });
     }

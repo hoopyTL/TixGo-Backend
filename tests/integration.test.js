@@ -146,9 +146,38 @@ async function createEvent(tickets = 3) {
   return res.body.data;
 }
 
-function book(eventId, key = randomUUID(), accessToken = token) {
-  const req = request(app).post("/bookings").set("Authorization", `Bearer ${accessToken}`).send({ eventId });
-  return key === null ? req : req.set("Idempotency-Key", key);
+const purchaseInputs = new Map();
+const seatOffsets = new Map();
+
+async function preparedPurchase(eventId, key, accessToken) {
+  const identity = `${accessToken}:${key}`;
+  const existing = purchaseInputs.get(identity);
+  if (existing) {
+    const result = await existing;
+    return { ...result, input: { ...result.input, eventId } };
+  }
+  const preparing = (async () => {
+    const seats = await db.seat.findMany({ where: { eventId }, orderBy: { number: "asc" } });
+    const offset = seatOffsets.get(eventId) || 0;
+    seatOffsets.set(eventId, offset + 1);
+    const input = { eventId, seatId: seats[offset % seats.length]?.id || randomUUID(), reservationId: randomUUID() };
+    const held = await request(app).post("/bookings/hold").set("Authorization", `Bearer ${accessToken}`).send(input);
+    return { input, held };
+  })();
+  purchaseInputs.set(identity, preparing);
+  const result = await preparing;
+  if (![200, 201].includes(result.held.status)) purchaseInputs.delete(identity);
+  return result;
+}
+
+async function book(eventId, key = randomUUID(), accessToken = token) {
+  if (key === null || !/^[0-9a-f-]{36}$/i.test(eventId)) {
+    return request(app).post("/bookings").set("Authorization", `Bearer ${accessToken}`).send({ eventId });
+  }
+  const prepared = await preparedPurchase(eventId, key, accessToken);
+  if (![200, 201].includes(prepared.held.status)) return prepared.held;
+  return request(app).post("/bookings").set("Authorization", `Bearer ${accessToken}`)
+    .set("Idempotency-Key", key).send(prepared.input);
 }
 
 before(async function () {
@@ -250,7 +279,7 @@ describe("Events and booking with PostgreSQL", () => {
     assert.equal(await db.booking.count({ where: { eventId: event.id } }), 1);
     assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 2);
   });
-  it("rolls back a booking and its key when inventory update fails, then permits retry", async () => {
+  it("rolls back a hold and its inventory write, then permits retry", async () => {
     const event = await createEvent();
     const key = randomUUID();
     await installInventoryFailure(event.id);
@@ -292,12 +321,14 @@ describe("Events and booking with PostgreSQL", () => {
   it("replays the committed result after the original response connection is lost", async () => {
     const event = await createEvent();
     const key = randomUUID();
+    const prepared = await preparedPurchase(event.id, key, token);
+    assert.equal(prepared.held.status, 201);
     const proxy = dropBookingResponse().listen(0, "127.0.0.1");
     await new Promise((resolve) => proxy.once("listening", resolve));
     try {
       await assert.rejects(async () => request(proxy).post("/bookings")
         .set("Authorization", `Bearer ${token}`).set("Idempotency-Key", key)
-        .send({ eventId: event.id }), { code: "ECONNRESET" });
+        .send(prepared.input), { code: "ECONNRESET" });
     } finally { await new Promise((resolve) => proxy.close(resolve)); }
     const saved = await db.idempotency.findUnique({ where: { userId_key: { userId, key } } });
     assert.equal(saved.status, "COMPLETED");
@@ -518,13 +549,13 @@ describe("Event authorization, ownership and inventory", () => {
     }
     assert.equal(await db.event.count(), initialCount);
   });
-  it("rejects invalid capacities and values beyond PostgreSQL int4 without rounding", async () => {
+  it("rejects invalid/int4 capacities and bounds synchronous seat creation without rounding", async () => {
     const initialCount = await db.event.count();
-    for (const totalTickets of [undefined, null, "3", 1.5, 0, -1, 2147483648, Number.MAX_SAFE_INTEGER + 1]) {
+    for (const totalTickets of [undefined, null, "3", 1.5, 0, -1, 10001, 2147483647, 2147483648, Number.MAX_SAFE_INTEGER + 1]) {
       assert.equal((await postEvent(eventPayload({ totalTickets }))).status, 400, String(totalTickets));
     }
     assert.equal(await db.event.count(), initialCount);
-    for (const totalTickets of [1, 2147483647]) {
+    for (const totalTickets of [1, 10000]) {
       const created = await postEvent(eventPayload({ totalTickets }));
       assert.equal(created.status, 201, JSON.stringify(created.body));
       assert.equal(created.body.data.totalTickets, totalTickets);
@@ -600,11 +631,12 @@ describe("Event authorization, ownership and inventory", () => {
       // The dedicated migration fixture below proves actual historical preservation.
       await client.query(`ALTER TABLE "${schema}".events DISABLE TRIGGER events_require_owner`);
       await client.query(`INSERT INTO "${schema}".events
-        (id, title, total_tickets, remain_tickets, price) VALUES ($1, 'Legacy ownerless', 3, 2, 1)`, [id]);
+        (id, title, total_tickets, remain_tickets, price) VALUES ($1, 'Legacy ownerless', 3, 3, 1)`, [id]);
       await client.query(`ALTER TABLE "${schema}".events ENABLE TRIGGER events_require_owner`);
       await client.query("COMMIT");
     } catch (error) { await client.query("ROLLBACK"); throw error; }
     finally { client.release(true); }
+    await db.seat.createMany({ data: [1, 2, 3].map((number) => ({ eventId: id, number })) });
     const catalog = await request(app).get("/events");
     assert.ok(catalog.body.some((event) => event.id === id));
     const key = randomUUID();
@@ -612,7 +644,7 @@ describe("Event authorization, ownership and inventory", () => {
     assert.equal((await book(id, key)).status, 200);
     const stored = await db.event.findUnique({ where: { id } });
     assert.equal(stored.organizerId, null);
-    assert.equal(stored.remainTickets, 1);
+    assert.equal(stored.remainTickets, 2);
     assert.equal(await db.booking.count({ where: { eventId: id } }), 1);
   });
   it("rolls back a failed event insert without creating an ownerless or partial event", async () => {
@@ -844,9 +876,8 @@ describe("Exact prices, keyset catalog and object access control", () => {
     assert.equal((await db.booking.findUnique({ where: { id } })).status, "CONFIRMED");
     assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 1);
     await db.event.update({ where: { id: event.id }, data: { remainTickets: 0 } });
-    await db.booking.update({ where: { id }, data: { status: "UNSUPPORTED" } });
-    assert.equal((await bookingRequest("post", id)).status, 409);
-    assert.equal((await db.booking.findUnique({ where: { id } })).status, "UNSUPPORTED");
+    await assert.rejects(() => db.booking.update({ where: { id }, data: { status: "UNSUPPORTED" } }));
+    assert.equal((await db.booking.findUnique({ where: { id } })).status, "CONFIRMED");
     assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 0);
     assert.equal((await patchEvent("invalid", { title: "Invalid ID" })).status, 400);
     assert.equal((await patchEvent(randomUUID(), { title: "Missing event" })).status, 404);
