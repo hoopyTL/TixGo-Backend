@@ -42,7 +42,7 @@ jobs:
       - name: Install dependencies
         run: |
           mkdir -p "$CI_ARTIFACT_DIR"
-          npm ci 2>&1 | tee "$CI_ARTIFACT_DIR/npm-ci.log"
+          npm ci --ignore-scripts 2>&1 | tee "$CI_ARTIFACT_DIR/npm-ci.log"
 
       - name: Start isolated test services
         run: |

@@ -207,7 +207,7 @@ PostgreSQL integration, reservation/fault/migration/restore, SQL và Postman.
 Lệnh dừng khi một gate lỗi và giữ exit code khác 0; không tự dựng hoặc dọn services.
 
 ```bash
-npm ci
+npm ci --ignore-scripts
 docker compose --profile test up -d --wait test-db test-redis
 export TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55432/tixgo_test
 export TEST_REDIS_URL=redis://127.0.0.1:56379
@@ -219,6 +219,11 @@ loopback cổng 56379, ép các child process dùng cấu hình test, không l�
 trong `.env`. Chạy reservation suite tuần tự vì nó chủ động restart Redis.
 `CI_ARTIFACT_DIR` mặc định `artifacts/ci`; summary.json, log từng gate và evidence
 được lưu ở đó. Thư mục artifact bị Git/Docker context loại.
+
+Dependency được cài với `--ignore-scripts`; Prisma generate chạy tường minh ở
+gate đầu tiên. Smoke/integration kiểm chứng cả bcrypt từ dependency sạch.
+Summary lấy commit từ `GITHUB_SHA` trong Actions; chạy local để `sha: null` nếu
+không có biến này, không gọi Git qua PATH để suy ra source của patch chưa commit.
 
 Workflow `.github/workflows/ci.yml` chạy trên push, pull request và manual
 workflow_dispatch, dùng Ubuntu/Node 22 và Compose test services riêng. Workflow

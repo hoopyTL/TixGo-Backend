@@ -1,4 +1,4 @@
-const { spawn, execFileSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
 const { createWriteStream, mkdirSync, writeFileSync } = require("node:fs");
 const path = require("node:path");
 const { createInterface } = require("node:readline");
@@ -28,7 +28,7 @@ function configuration() {
   let redis;
   try { postgres = new URL(process.env.TEST_DATABASE_URL); }
   catch { throw new Error("TEST_DATABASE_URL must be a valid PostgreSQL URL."); }
-  if (!["postgres:", "postgresql:"].includes(postgres.protocol) || !/_test$/.test(decodeURIComponent(postgres.pathname))) {
+  if (!["postgres:", "postgresql:"].includes(postgres.protocol) || !decodeURIComponent(postgres.pathname).endsWith("_test")) {
     throw new Error("TEST_DATABASE_URL must point to a PostgreSQL database ending in _test.");
   }
   if (!process.env.TEST_REDIS_URL) throw new Error("TEST_REDIS_URL is required; the development REDIS_URL is never used.");
@@ -52,6 +52,20 @@ function terminate(child, signal) {
   } catch (error) {
     if (error.code !== "ESRCH") console.error(`Unable to stop test process: ${sanitize(error.message)}`);
   }
+}
+
+function stageExitCode({ code, signal }, timedOut) {
+  if (timedOut) return 124;
+  if (code !== null) return code;
+  if (signal === "SIGINT") return 130;
+  if (signal === "SIGTERM") return 143;
+  return 1;
+}
+
+function runStatus(interruption, passed) {
+  if (interruption.signal) return "cancelled";
+  if (passed) return "passed";
+  return "failed";
 }
 
 async function runGate(gate, environment, directory, timeout, interruption) {
@@ -98,10 +112,10 @@ async function runGate(gate, environment, directory, timeout, interruption) {
   if (!outputError) await new Promise((resolve, reject) => { output.once("error", reject); output.end(resolve); });
   if (outputError) throw outputError;
   result.finishedAt = new Date().toISOString();
-  result.exitCode = timedOut ? 124 : closed.code ?? (closed.signal === "SIGINT" ? 130 : closed.signal === "SIGTERM" ? 143 : 1);
+  result.exitCode = stageExitCode(closed, timedOut);
   result.signal = closed.signal;
   result.timedOut = timedOut;
-  result.status = interruption.signal ? "cancelled" : result.exitCode === 0 ? "passed" : "failed";
+  result.status = runStatus(interruption, result.exitCode === 0);
   console.log(`CI: ${name} ${result.status} (exit ${result.exitCode})`);
   if (result.status !== "passed") console.error(tail.join("\n"));
   return result;
@@ -116,9 +130,7 @@ async function main() {
   const runId = `run-${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
   const directory = path.join(artifactRoot, runId);
   mkdirSync(directory, { recursive: true });
-  let sha;
-  try { sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); }
-  catch { sha = null; }
+  const sha = process.env.GITHUB_SHA || null;
   const summary = { version: 1, runId, node: process.version, sha, status: "running", startedAt: new Date().toISOString(), artifactDirectory: directory, steps: [] };
   const save = () => {
     const json = `${JSON.stringify(summary, null, 2)}\n`;
@@ -149,7 +161,7 @@ async function main() {
         break;
       }
     }
-    summary.status = interruption.signal ? "cancelled" : summary.steps.length === gates.length && summary.steps.every((step) => step.status === "passed") ? "passed" : "failed";
+    summary.status = runStatus(interruption, summary.steps.length === gates.length && summary.steps.every((step) => step.status === "passed"));
     if (interruption.signal) process.exitCode = interruption.signal === "SIGINT" ? 130 : 143;
     else if (summary.status !== "passed") process.exitCode ||= 1;
   } catch (error) {
