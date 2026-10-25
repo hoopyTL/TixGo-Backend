@@ -25,7 +25,7 @@ describe("API smoke tests (no database required)", () => {
   it("returns health", async () => {
     const res = await request(app).get("/health");
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body, { status: "Ok" });
+    assert.deepEqual(res.body, { status: "BROKEN_FOR_CI_PROOF" });
   });
   it("returns 404 for an unknown route", async () => {
     assert.equal((await request(app).get("/missing-route")).status, 404);
