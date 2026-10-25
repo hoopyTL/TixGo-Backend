@@ -8,10 +8,15 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "lint": "node --check tests/server.test.js && node --check tests/integration.test.js && node --check tests/api-scenarios.js && node --check tests/login-throttle.test.js && node --check tests/money-migration.js && node --check tests/sql-query-plan.js && bash -n tests/race-condition.sh tests/idempotency.sh",
+    "lint": "node tests/check-syntax.js",
     "test": "npm run build && mocha tests/server.test.js tests/login-throttle.test.js",
     "test:integration": "npm run build && mocha --timeout 30000 tests/integration.test.js",
-    "test:sql": "node tests/money-migration.js && node tests/sql-query-plan.js"
+    "test:sql": "node tests/money-migration.js && node tests/sql-query-plan.js",
+    "worker:reservations": "node dist/workers/reservation-expiry.worker.js",
+    "test:reservation": "npm run build && mocha --timeout 30000 tests/reservation.test.js tests/reservation-migration.test.js",
+    "test:booking:lab": "node tests/booking-lab.js",
+    "test:booking:load": "npm run build && node tests/booking-load.js",
+    "test:postman": "npm run build && node tests/postman/verify-collection.js"
   },
   "license": "MIT",
   "devDependencies": {
@@ -33,6 +38,7 @@
     "express": "^4.22.2",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.22.0",
+    "redis": "^5.12.1",
     "zod": "^4.4.3"
   },
   "description": "This project is based on a GitLab [Project Template](https://docs.gitlab.com/ee/user/project/#create-a-project-from-a-built-in-template).",

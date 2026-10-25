@@ -5,7 +5,10 @@ import { CreateEventSchema } from "../validators/event.validator";
 import { authenticate } from "../middlewares/auth.middleware";
 import { UpdateEventSchema } from "../validators/resource.validator";
 
+import { ReservationController } from "../controllers/reservation.controller";
+
 const router = Router();
+router.get("/:id/seats", ReservationController.seats);
 
 router.get("/", EventController.getAllEvents);
 router.patch("/:id", authenticate, validate(UpdateEventSchema), EventController.updateEvent);
