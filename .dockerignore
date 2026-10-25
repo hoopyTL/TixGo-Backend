@@ -9,8 +9,28 @@ roadmap-update.md
 .git
 .env
 .env.*
-!.env.example
 .DS_Store
 
 # CI logs and test evidence
 /artifacts/
+
+# Local tools, test UI and private-key material
+.codex
+.vscode
+public
+coverage
+*.log
+*.pem
+*.key
+*.p12
+*.pfx
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+.ssh
+**/.ssh
+id_rsa
+id_ed25519

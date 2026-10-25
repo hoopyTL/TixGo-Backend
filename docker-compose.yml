@@ -1,6 +1,8 @@
 services:
   api:
-    build: .
+    build:
+      context: .
+      target: development
     ports:
       - "3000:3000"
     volumes:
@@ -63,7 +65,9 @@ services:
       retries: 15
 
   reservation-worker:
-    build: .
+    build:
+      context: .
+      target: development
     profiles: [worker]
     command: ["sh", "-c", "npx prisma generate && npm run build && npm run worker:reservations"]
     volumes:
