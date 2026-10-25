@@ -62,5 +62,19 @@ services:
       timeout: 3s
       retries: 15
 
+  reservation-worker:
+    build: .
+    profiles: [worker]
+    command: ["sh", "-c", "npx prisma generate && npm run build && npm run worker:reservations"]
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/tixgo?schema=public
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - db
+      - redis
+
 volumes:
   postgres_data:

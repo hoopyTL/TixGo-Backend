@@ -11,7 +11,8 @@
     "lint": "node --check tests/server.test.js && node --check tests/integration.test.js && node --check tests/api-scenarios.js && node --check tests/login-throttle.test.js && node --check tests/money-migration.js && node --check tests/sql-query-plan.js && bash -n tests/race-condition.sh tests/idempotency.sh",
     "test": "npm run build && mocha tests/server.test.js tests/login-throttle.test.js",
     "test:integration": "npm run build && mocha --timeout 30000 tests/integration.test.js",
-    "test:sql": "node tests/money-migration.js && node tests/sql-query-plan.js"
+    "test:sql": "node tests/money-migration.js && node tests/sql-query-plan.js",
+    "worker:reservations": "node dist/workers/reservation-expiry.worker.js"
   },
   "license": "MIT",
   "devDependencies": {
