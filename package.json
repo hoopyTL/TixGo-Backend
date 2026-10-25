@@ -14,6 +14,8 @@
     "test:sql": "node tests/money-migration.js && node tests/sql-query-plan.js",
     "worker:reservations": "node dist/workers/reservation-expiry.worker.js",
     "test:reservation": "npm run build && mocha --timeout 30000 tests/reservation.test.js tests/reservation-migration.test.js",
+    "test:booking:lab": "node tests/booking-lab.js",
+    "test:booking:load": "npm run build && node tests/booking-load.js",
     "test:postman": "npm run build && node tests/postman/verify-collection.js"
   },
   "license": "MIT",
