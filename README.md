@@ -237,6 +237,73 @@ hosted cần publish workflow và đối chiếu GitHub run URL; chạy xanh loc
 workflow hợp lệ về syntax chưa chứng minh GitHub Actions đã thực chạy. Dependency
 audit là phần riêng: pipeline test không tự sửa hoặc che các advisory baseline.
 
+## Production image
+
+Dockerfile mặc định build target `runtime`: Node 22, user `node`, code JavaScript
+đã compile và dependency production (bỏ dev/optional dependencies). Prisma Client được generate lúc build.
+Image không cần source mount hoặc npm/TypeScript/Prisma CLI khi khởi động.
+API và reservation worker dùng cùng image; migration chạy bằng target riêng.
+
+```bash
+export VCS_REF="$(git rev-parse HEAD)"
+export TIXGO_IMAGE="tixgo:$VCS_REF"
+export TIXGO_MIGRATION_IMAGE="tixgo:migration-$VCS_REF"
+docker build --target runtime --build-arg VCS_REF="$VCS_REF" -t "$TIXGO_IMAGE" .
+docker build --target migration --build-arg VCS_REF="$VCS_REF" -t "$TIXGO_MIGRATION_IMAGE" .
+```
+
+Build từ checkout đã commit để tag/revision xác định đúng source. Nếu đang thử
+patch chưa commit, dùng hậu tố `-wip` và lưu diff/hash cùng evidence. Base image
+được pin digest; việc nâng base cần build, scan và kiểm chứng lại.
+
+Chuẩn bị một env file riêng ngoài repo chứa `DATABASE_URL`, `REDIS_URL` và
+`JWT_SECRET` thật của môi trường chạy; không truyền secret bằng build arg.
+Đặt `TIXGO_ENV_FILE` thành đường dẫn env file đó và `TIXGO_NETWORK` thành tên
+external network đã được provision cho app/database; Compose dùng lại network này.
+Database/Redis do môi trường cung cấp, URL phải truy cập được từ network của
+container. Với dữ liệu có sẵn, kiểm kê/backup và dừng các writer trước migration.
+Ví dụ dưới dùng network Docker đã được chuẩn bị cho app và database:
+
+```bash
+docker run --rm --network "$TIXGO_NETWORK" --env-file "$TIXGO_ENV_FILE" "$TIXGO_MIGRATION_IMAGE"
+docker compose --env-file "$TIXGO_ENV_FILE" -f compose.production.yml up -d
+docker compose --env-file "$TIXGO_ENV_FILE" -f compose.production.yml ps
+```
+
+`compose.production.yml` chỉ chạy API/worker, không dựng hoặc migrate database.
+Database/Redis Docker phải được nối vào `TIXGO_NETWORK`; không dùng `localhost`
+để chỉ container DB. Với database ngoài Docker, chuẩn bị một bridge network cho
+app và dùng hostname truy cập được của database/Redis.
+API bind host loopback, `TIXGO_PORT` mặc định3000. Compose bật read-only rootfs,
+tmpfs `/tmp`, bỏ capabilities và no-new-privileges. Healthcheck của image kiểm tra
+HTTP `/health`; đây là liveness, chưa kiểm tra readiness DB. Worker tắt HTTP
+healthcheck và dừng qua SIGTERM. `stop_grace_period` là20giây.
+
+Kiểm chứng image từ checkout sạch, sau khi đã build hai target:
+
+```bash
+npm ci --ignore-scripts
+IMAGE_REF="$TIXGO_IMAGE" MIGRATION_IMAGE_REF="$TIXGO_MIGRATION_IMAGE" npm run test:image
+```
+
+Verifier tự tạo network, PostgreSQL `_test` và Redis riêng với cổng loopback ngẫu
+nhiên; chạy migration thật, auth/bcrypt, booking/replay/cancel, Redis và worker
+expiry; kiểm tra non-root, payload image, healthcheck và SIGTERM exit0. Nó chỉ
+dọn tài nguyên do chính run tạo. `IMAGE_EVIDENCE_DIR` mặc định `artifacts/image`;
+`DOCKER_BIN` cho phép chọn đường dẫn tuyệt đối của Docker CLI.
+
+Scan local bằng Trivy và giữ cả report/SBOM để đối chiếu đúng image:
+
+```bash
+trivy image --scanners vuln,secret --format json --output image-scan.json "$TIXGO_IMAGE"
+trivy image --format cyclonedx --output image-sbom.json "$TIXGO_IMAGE"
+docker image inspect "$TIXGO_IMAGE" --format '{{.Id}} {{.Size}} {{.Architecture}}'
+```
+
+Scan phải ghi rõ version/DB timestamp và các finding còn lại; build/test xanh
+không đồng nghĩa image không có CVE. Publishing/deployment là bước riêng.
+Compose dev hiện có chọn target `development`, giữ source mount và `npm run dev`.
+
 ## Build
 
 ```bash

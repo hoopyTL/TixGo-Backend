@@ -17,7 +17,8 @@
     "test:booking:lab": "node tests/booking-lab.js",
     "test:booking:load": "npm run build && node tests/booking-load.js",
     "test:postman": "npm run build && node tests/postman/verify-collection.js",
-    "test:ci": "node scripts/test-ci.js"
+    "test:ci": "node scripts/test-ci.js",
+    "test:image": "node tests/production-image.js"
   },
   "license": "MIT",
   "devDependencies": {
@@ -40,7 +41,7 @@
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.22.0",
     "redis": "^5.12.1",
-    "zod": "^4.4.3"
+    "zod": "^4.6.7"
   },
   "description": "This project is based on a GitLab [Project Template](https://docs.gitlab.com/ee/user/project/#create-a-project-from-a-built-in-template).",
   "directories": {
