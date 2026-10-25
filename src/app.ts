@@ -5,6 +5,7 @@ import authRouter from "./routes/auth.route";
 import bookingRouter from "./routes/booking.route";
 
 export const app = express();
+app.disable("x-powered-by");
 
 app.use(express.json());
 app.use("/events", eventRouter);

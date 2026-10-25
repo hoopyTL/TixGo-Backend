@@ -54,7 +54,6 @@ async function testIdempotency(before) {
   assert.equal(mismatch.status, 400);
   assert.equal((await getEvent()).remainTickets, before.remainTickets - 1);
   console.log("PASS: create=201, replay=200 (same booking ID), mismatch=400, exactly one ticket consumed.");
-  console.log(`Booking ID: ${first.body.data.id}`);
 }
 
 async function testRace(before) {
