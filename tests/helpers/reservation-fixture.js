@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { randomUUID } = require("node:crypto");
+const { randomUUID, randomInt } = require("node:crypto");
 const { readdirSync, readFileSync, mkdirSync, writeFileSync } = require("node:fs");
 const path = require("node:path");
 const net = require("node:net");
@@ -182,7 +182,7 @@ async function createFixture() {
 
   async function gate(table, eventId, timing = "BEFORE") {
     const connection = await pool.connect();
-    const key = Math.floor(Math.random() * 1000000000);
+    const key = randomInt(1000000000);
     await connection.query("SELECT pg_advisory_lock($1::bigint)", [key]);
     const { rows: [{ pid }] } = await connection.query("SELECT pg_backend_pid() AS pid");
     const remove = await trigger(table, eventId, `PERFORM pg_advisory_xact_lock(${key}::bigint)`, timing);

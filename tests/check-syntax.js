@@ -12,6 +12,6 @@ for (const file of [...files(path.join(__dirname)), ...files(path.join(__dirname
   // k6 modules use its own runtime; each executable scenario is parsed by k6 inspect/run.
   if (file.includes(`${path.sep}k6${path.sep}`)) continue;
   if (file.endsWith(".js")) execFileSync(process.execPath, ["--check", file], { stdio: "inherit" });
-  if (file.endsWith(".sh")) execFileSync("bash", ["-n", file], { stdio: "inherit" });
+  if (file.endsWith(".sh")) execFileSync("/bin/bash", ["-n", file], { stdio: "inherit" });
 }
 console.log("JavaScript and shell syntax checks passed.");

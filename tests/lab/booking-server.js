@@ -13,6 +13,7 @@ async function startLab({ connectionString, schema, mode, secret, delayMs = 80, 
   const pool = new Pool({ connectionString, max: poolSize, options: `-c search_path="${schema}" -c statement_timeout=10000` });
   const traces = [];
   const app = express();
+  app.disable("x-powered-by");
   app.use(express.json());
   app.post("/bookings", async (req, res) => {
     const trace = { key: req.get("Idempotency-Key"), receivedAt: new Date().toISOString(), mode };
