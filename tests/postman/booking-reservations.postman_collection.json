@@ -1,0 +1,479 @@
+{
+  "info": {
+    "name": "Booking reservations",
+    "description": "Set organizer_token after registering and promoting a lab account outside signup. Run in order against a lab database. Each list-seats step prepares a new reservation/key. No payment is performed.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "buyer_email",
+      "value": "buyer@example.com",
+      "type": "string"
+    },
+    {
+      "key": "buyer_password",
+      "value": "test-password",
+      "type": "string"
+    },
+    {
+      "key": "organizer_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "event_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "seat_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "reservation_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "idempotency_key",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "booking_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Register buyer",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/auth/register",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{buyer_email}}\",\n  \"password\": \"{{buyer_password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"registered\", () => pm.response.to.have.status(201));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Login buyer",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{buyer_email}}\",\n  \"password\": \"{{buyer_password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"logged in\", () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set(\"access_token\", pm.response.json().data.accessToken);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create event (set organizer_token first)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{organizer_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/events",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Reservation walkthrough\",\n  \"totalTickets\": 3,\n  \"price\": \"100000.00\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"created\", () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set(\"event_id\", pm.response.json().data.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "List seats and prepare a purchase",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/events/{{event_id}}/seats"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"seats\", () => pm.response.to.have.status(200));",
+              "const seat = pm.response.json().data.find(s => s.status === \"AVAILABLE\");",
+              "pm.expect(seat).to.exist;",
+              "pm.collectionVariables.set(\"seat_id\", seat.id);",
+              "pm.collectionVariables.set(\"reservation_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+              "pm.collectionVariables.set(\"idempotency_key\", pm.variables.replaceIn(\"{{$guid}}\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Hold seat",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/bookings/hold",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": \"{{event_id}}\",\n  \"seatId\": \"{{seat_id}}\",\n  \"reservationId\": \"{{reservation_id}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"held\", () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set(\"expires_at\", pm.response.json().data.expiresAt);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Read hold",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/bookings/holds/{{reservation_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"owner reads\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Confirm",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "{{idempotency_key}}"
+          }
+        ],
+        "url": "{{base_url}}/bookings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": \"{{event_id}}\",\n  \"seatId\": \"{{seat_id}}\",\n  \"reservationId\": \"{{reservation_id}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"confirmed\", () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set(\"booking_id\", pm.response.json().data.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Replay confirm (same key and body)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "{{idempotency_key}}"
+          }
+        ],
+        "url": "{{base_url}}/bookings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": \"{{event_id}}\",\n  \"seatId\": \"{{seat_id}}\",\n  \"reservationId\": \"{{reservation_id}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"replayed\", () => pm.response.to.have.status(200));",
+              "pm.expect(pm.response.headers.get(\"Idempotent-Replayed\")).to.eql(\"true\");",
+              "pm.expect(pm.response.json().data.id).to.eql(pm.collectionVariables.get(\"booking_id\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cancel booking",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/bookings/{{booking_id}}/cancel",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"cancelled\", () => pm.response.to.have.status(200));",
+              "pm.expect(pm.response.json().data.status).to.eql(\"CANCELLED\");"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Repeat cancellation",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/bookings/{{booking_id}}/cancel",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"cancelled again\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Replay after cancel (historical snapshot)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "{{idempotency_key}}"
+          }
+        ],
+        "url": "{{base_url}}/bookings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": \"{{event_id}}\",\n  \"seatId\": \"{{seat_id}}\",\n  \"reservationId\": \"{{reservation_id}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"historical replay\", () => pm.response.to.have.status(200));",
+              "pm.expect(pm.response.json().data.status).to.eql(\"CONFIRMED\");"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Read current booking state",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/bookings/{{booking_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"current state\", () => pm.response.to.have.status(200));",
+              "pm.expect(pm.response.json().data.status).to.eql(\"CANCELLED\");"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
