@@ -70,3 +70,6 @@ docs
 /DESIGN.md
 /roadmap-update.md
 .DS_Store
+
+# CI logs and test evidence
+/artifacts/

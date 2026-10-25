@@ -212,6 +212,7 @@ before(async function () {
 after(async () => {
   try {
     if (apiServer) await new Promise((resolve) => apiServer.close(resolve));
+    await require("../dist/configs/redis").closeReservationCache();
     if (db) await db.$disconnect();
   }
   finally {
