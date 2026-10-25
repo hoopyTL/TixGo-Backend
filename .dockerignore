@@ -11,3 +11,6 @@ roadmap-update.md
 .env.*
 !.env.example
 .DS_Store
+
+# CI logs and test evidence
+/artifacts/

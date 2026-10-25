@@ -199,6 +199,44 @@ chỉ từ HTTP count; lỗi mạng cần reconcile bằng identity cũ. Đây l
 lab, chưa là kết quả benchmark production/HA/payment hoặc bảo đảm không có lỗi
 ngoài các kịch bản đã kiểm chứng.
 
+
+## Continuous integration
+
+`npm run test:ci` chạy tuần tự Prisma generate, syntax/typecheck, smoke,
+PostgreSQL integration, reservation/fault/migration/restore, SQL và Postman.
+Lệnh dừng khi một gate lỗi và giữ exit code khác 0; không tự dựng hoặc dọn services.
+
+```bash
+npm ci --ignore-scripts
+docker compose --profile test up -d --wait test-db test-redis
+export TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55432/tixgo_test
+export TEST_REDIS_URL=redis://127.0.0.1:56379
+npm run test:ci
+```
+
+Dùng Node 22 như workflow/Dockerfile. Runner bắt buộc DB `_test` và Redis test
+loopback cổng 56379, ép các child process dùng cấu hình test, không lấy DB dev
+trong `.env`. Chạy reservation suite tuần tự vì nó chủ động restart Redis.
+`CI_ARTIFACT_DIR` mặc định `artifacts/ci`; summary.json, log từng gate và evidence
+được lưu ở đó. Thư mục artifact bị Git/Docker context loại.
+
+Dependency được cài với `--ignore-scripts`; Prisma generate chạy tường minh ở
+gate đầu tiên. Smoke/integration kiểm chứng cả bcrypt từ dependency sạch.
+Summary lấy commit từ `GITHUB_SHA` trong Actions; chạy local để `sha: null` nếu
+không có biến này, không gọi Git qua PATH để suy ra source của patch chưa commit.
+
+Workflow `.github/workflows/ci.yml` chạy trên push, pull request và manual
+workflow_dispatch, dùng Ubuntu/Node 22 và Compose test services riêng. Workflow
+luôn thu diagnostics, dọn test containers và upload log sau khi thành công hoặc
+thất bại. Các action được pin commit SHA; token chỉ có contents:read, không cần
+app secrets. Manual dispatch dùng được sau khi workflow có trên default branch.
+K6 lab/load tiếp tục chạy qua các command riêng, không thuộc gate PR mặc định.
+
+Lỗi assertion phải làm CI đỏ; sửa assertion làm cùng pipeline xanh. Kiểm chứng
+hosted cần publish workflow và đối chiếu GitHub run URL; chạy xanh local hoặc
+workflow hợp lệ về syntax chưa chứng minh GitHub Actions đã thực chạy. Dependency
+audit là phần riêng: pipeline test không tự sửa hoặc che các advisory baseline.
+
 ## Build
 
 ```bash

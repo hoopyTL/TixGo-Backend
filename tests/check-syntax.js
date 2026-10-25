@@ -8,7 +8,7 @@ function files(directory) {
     return entry.isDirectory() ? files(file) : [file];
   });
 }
-for (const file of files(path.join(__dirname))) {
+for (const file of [...files(path.join(__dirname)), ...files(path.join(__dirname, "../scripts"))]) {
   // k6 modules use its own runtime; each executable scenario is parsed by k6 inspect/run.
   if (file.includes(`${path.sep}k6${path.sep}`)) continue;
   if (file.endsWith(".js")) execFileSync(process.execPath, ["--check", file], { stdio: "inherit" });
