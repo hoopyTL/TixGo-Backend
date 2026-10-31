@@ -1,3 +1,4 @@
+import { asyncHandler } from "../middlewares/error.middleware";
 import { Router } from "express";
 import { LoginSchema, RegisterSchema } from "../validators/auth.validator";
 import { AuthController } from "../controllers/auth.controller";
@@ -7,9 +8,9 @@ import { loginRateLimiter } from "../middlewares/login-rate-limit.middleware";
 
 const router = Router();
 
-router.post("/register", validate(RegisterSchema), AuthController.register);
+router.post("/register", validate(RegisterSchema), asyncHandler(AuthController.register));
 
-router.post("/login", loginRateLimiter, validate(LoginSchema), AuthController.login);
+router.post("/login", loginRateLimiter, validate(LoginSchema), asyncHandler(AuthController.login));
 
 router.get("/me", authenticate, (req, res) => {
   res.json({

@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "node tests/check-syntax.js",
-    "test": "npm run build && mocha tests/server.test.js tests/login-throttle.test.js tests/security.test.js",
+    "test": "npm run build && mocha tests/server.test.js tests/login-throttle.test.js tests/security.test.js tests/error-contract.test.js",
     "test:integration": "npm run build && mocha --timeout 30000 tests/integration.test.js",
     "test:sql": "node tests/money-migration.js && node tests/sql-query-plan.js",
     "worker:reservations": "node dist/workers/reservation-expiry.worker.js",

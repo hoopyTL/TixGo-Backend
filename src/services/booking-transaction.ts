@@ -1,6 +1,7 @@
+import { ServiceUnavailableError } from "../errors/http-errors";
+import { AppError } from "../errors/AppError";
 import { Prisma } from "@prisma/client";
 import { db } from "../configs/db";
-import { AppError } from "../errors/AppError";
 
 function setting(name: string, fallback: number, maximum: number) {
   const value = Number(process.env[name] ?? fallback);
@@ -45,5 +46,5 @@ export async function withBookingTransaction<T>(work: (tx: Prisma.TransactionCli
       await new Promise((resolve) => setTimeout(resolve, 25 * attempt + Math.floor(Math.random() * 50)));
     }
   }
-  throw new AppError(503, "Booking is busy; retry with the same request identity", "BOOKING_BUSY");
+  throw new ServiceUnavailableError("Booking is busy; retry with the same request identity", "BOOKING_BUSY", 1);
 }

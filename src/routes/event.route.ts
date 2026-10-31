@@ -1,3 +1,4 @@
+import { asyncHandler } from "../middlewares/error.middleware";
 import { Router } from "express";
 import { EventController } from "../controllers/event.controller";
 import { validate } from "../middlewares/validate.middleware";
@@ -8,11 +9,11 @@ import { UpdateEventSchema } from "../validators/resource.validator";
 import { ReservationController } from "../controllers/reservation.controller";
 
 const router = Router();
-router.get("/:id/seats", ReservationController.seats);
+router.get("/:id/seats", asyncHandler(ReservationController.seats));
 
-router.get("/", EventController.getAllEvents);
-router.patch("/:id", authenticate, validate(UpdateEventSchema), EventController.updateEvent);
+router.get("/", asyncHandler(EventController.getAllEvents));
+router.patch("/:id", authenticate, validate(UpdateEventSchema), asyncHandler(EventController.updateEvent));
 
-router.post("/", authenticate, validate(CreateEventSchema), EventController.createEvent);
+router.post("/", authenticate, validate(CreateEventSchema), asyncHandler(EventController.createEvent));
 
 export default router;

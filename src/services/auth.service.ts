@@ -1,8 +1,8 @@
+import { ConflictError, ForbiddenError, UnauthorizedError } from "../errors/http-errors";
 import { db } from "../configs/db";
 import { RegisterInput, LoginInput } from "../validators/auth.validator";
 import { comparePassword, hashPassword } from "../utils/password";
 import { signToken } from "../utils/jwt";
-import { AppError } from "../errors/AppError";
 
 export const AuthService = {
   register: async (data: RegisterInput) => {
@@ -10,7 +10,7 @@ export const AuthService = {
     const user = await db.user.findUnique({ where: { email } });
 
     if (user) {
-      throw new AppError(409, "Email đã tồn tại");
+      throw new ConflictError("Email đã tồn tại");
     }
 
     const passwordHash = await hashPassword(password);
@@ -25,17 +25,17 @@ export const AuthService = {
     const user = await db.user.findUnique({ where: { email } });
 
     if (!user) {
-      throw new AppError(401, "Email hoặc mật khẩu không chính xác");
+      throw new UnauthorizedError("Email hoặc mật khẩu không chính xác");
     }
 
     const isMatch = await comparePassword(password, user.passwordHash);
     if (!isMatch) {
-      throw new AppError(401, "Email hoặc mật khẩu không chính xác");
+      throw new UnauthorizedError("Email hoặc mật khẩu không chính xác");
     }
 
     const role = user.role;
     if (role !== "buyer" && role !== "organizer" && role !== "admin") {
-      throw new AppError(403, "Vai trò tài khoản không hợp lệ");
+      throw new ForbiddenError("Vai trò tài khoản không hợp lệ");
     }
 
     const accessToken = signToken({ userId: user.id, role });

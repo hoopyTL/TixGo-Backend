@@ -4,6 +4,7 @@ const request = require("supertest");
 const { createLoginRateLimiter } = require("../dist/middlewares/login-rate-limit.middleware");
 const { validate } = require("../dist/middlewares/validate.middleware");
 const { LoginSchema } = require("../dist/validators/auth.validator");
+const { errorHandler } = require("../dist/middlewares/error.middleware");
 
 const servers = new Set();
 
@@ -16,6 +17,7 @@ async function fixture(options = {}) {
     reached++;
     return res.sendStatus(req.body.password === "correct" ? 200 : 401);
   });
+  app.use(errorHandler);
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
   servers.add(server);
@@ -38,7 +40,10 @@ describe("Login throttling over HTTP", () => {
     assert.equal(blocked.status, 429);
     assert.equal(blocked.headers["retry-after"], "900");
     assert.equal(test.reached(), 5);
-    assert.deepEqual(blocked.body, { error: "Too many login attempts. Try again later." });
+    assert.deepEqual(blocked.body, {
+      message: "Too many login attempts. Try again later.",
+      code: "TOO_MANY_REQUESTS",
+    });
   });
 
   it("counts successful attempts in the same budget", async () => {

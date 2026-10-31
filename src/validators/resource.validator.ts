@@ -1,5 +1,5 @@
+import { BadRequestError } from "../errors/http-errors";
 import { z } from "zod";
-import { AppError } from "../errors/AppError";
 import { PriceSchema } from "../utils/money";
 import { decodeCatalogCursor } from "../utils/catalog-cursor";
 
@@ -21,13 +21,13 @@ const CatalogQuerySchema = z.object({
 
 export function parseResourceId(value: unknown): string {
   const result = ResourceIdSchema.safeParse(value);
-  if (!result.success) throw new AppError(400, "Invalid resource ID");
+  if (!result.success) throw new BadRequestError("Invalid resource ID");
   return result.data;
 }
 
 export function parseCatalogQuery(value: unknown) {
   const result = CatalogQuerySchema.safeParse(value);
-  if (!result.success) throw new AppError(400, "Invalid catalog query");
+  if (!result.success) throw new BadRequestError("Invalid catalog query");
   return { limit: result.data.limit, cursor: result.data.cursor ? decodeCatalogCursor(result.data.cursor) : undefined };
 }
 

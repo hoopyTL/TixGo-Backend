@@ -1,6 +1,6 @@
+import { BadRequestError, ForbiddenError, NotFoundError, UnauthorizedError } from "../errors/http-errors";
 import { Prisma } from "@prisma/client";
 import { db } from "../configs/db";
-import { AppError } from "../errors/AppError";
 import { CreateEventInput } from "../validators/event.validator";
 import { CatalogQuery, UpdateEventInput } from "../validators/resource.validator";
 import { encodeCatalogCursor } from "../utils/catalog-cursor";
@@ -50,21 +50,21 @@ export const EventService = {
         ORDER BY id FOR SHARE
       `;
       const actor = users.find((user) => user.id === actorId);
-      if (!actor) throw new AppError(401, "Authenticated account no longer exists");
+      if (!actor) throw new UnauthorizedError("Authenticated account no longer exists");
       if (actor.role !== "organizer" && actor.role !== "admin") {
-        throw new AppError(403, "Only organizers and admins can create events");
+        throw new ForbiddenError("Only organizers and admins can create events");
       }
 
       let organizerId: string;
       if (actor.role === "organizer") {
         if (data.organizerId !== undefined) {
-          throw new AppError(400, "Organizers cannot specify an owner");
+          throw new BadRequestError("Organizers cannot specify an owner");
         }
         organizerId = actor.id;
       } else {
         const recipient = users.find((user) => user.id === data.organizerId);
         if (!recipient || recipient.role !== "organizer") {
-          throw new AppError(400, "Admin must specify an existing organizer in organizerId");
+          throw new BadRequestError("Admin must specify an existing organizer in organizerId");
         }
         organizerId = recipient.id;
       }
@@ -93,13 +93,13 @@ export const EventService = {
     return db.$transaction(async (tx) => {
       const actor = await lockCurrentActor(tx, actorId);
       if (actor.role !== "organizer" && actor.role !== "admin") {
-        throw new AppError(403, "Only organizers and admins can update events");
+        throw new ForbiddenError("Only organizers and admins can update events");
       }
       const [event] = await tx.$queryRaw<{ id: string; organizer_id: string | null }[]>`
         SELECT id, organizer_id FROM events WHERE id = ${eventId} FOR UPDATE
       `;
       if (!event || (actor.role !== "admin" && event.organizer_id !== actor.id)) {
-        throw new AppError(404, "Event not found");
+        throw new NotFoundError("Event not found");
       }
       const updated = await tx.event.update({
         where: { id: event.id },
