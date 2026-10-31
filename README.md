@@ -119,6 +119,19 @@ Organizers create their own Events; admins specify an existing organizer. Event 
 
 Prices are decimal strings such as `"100000.00"`. The catalog returns a public array; pass `X-Next-Cursor` back as the `cursor` query parameter for the next page. PATCH does not change ownership or inventory.
 
+Application errors use a shared JSON contract, including unknown routes and JSON parser failures:
+
+```json
+{
+  "message": "Seat is unavailable",
+  "code": "SEAT_UNAVAILABLE"
+}
+```
+
+Error bodies contain exactly `message` and `code`, matching the names used by `AppError`. Use `code` for client decisions. Zod validation remains enabled; invalid input returns `400/VALIDATION_ERROR` with a generic message. Existing booking codes remain at the top level. Login throttling returns `429/TOO_MANY_REQUESTS` with `Retry-After`; exhausted booking retries return `503/BOOKING_BUSY` with `Retry-After: 1`. Unexpected errors return a safe `500/INTERNAL_ERROR` without internal diagnostics. HEAD responses have no body, and failures after headers are sent cannot be replaced with a JSON response.
+
+The global error middleware preserves valid HTTP error statuses from `statusCode` or `status` (integers 400–599; `statusCode` takes precedence). Non-`AppError` failures use generic responses: `REQUEST_ERROR` / `Request failed` for 4xx and `INTERNAL_ERROR` / `Internal server error` for 5xx. For example, malformed JSON returns 400 and oversized bodies return 413, both with `REQUEST_ERROR`. Invalid or missing statuses fall back to 500. Async controllers are wrapped with `asyncHandler`; it is exported alongside `notFound` and `errorHandler` from `src/middlewares/error.middleware.ts`.
+
 </details>
 
 <details>

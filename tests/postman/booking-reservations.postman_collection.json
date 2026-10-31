@@ -474,6 +474,154 @@
           }
         }
       ]
+    },
+    {
+      "name": "Reject unauthenticated booking",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/bookings",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"expected error status and code\", () => {",
+              "  pm.response.to.have.status(401);",
+              "  pm.expect(pm.response.json().code).to.eql(\"UNAUTHORIZED\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reject invalid login payload",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"expected error status and code\", () => {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().code).to.eql(\"VALIDATION_ERROR\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reject malformed JSON",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{invalid",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"expected error status and code\", () => {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().code).to.eql(\"REQUEST_ERROR\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Return JSON for an unknown route",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/missing-route"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"expected error status and code\", () => {",
+              "  pm.response.to.have.status(404);",
+              "  pm.expect(pm.response.json().code).to.eql(\"NOT_FOUND\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (pm.response.code >= 400) {",
+          "  pm.test(\"error follows the shared contract\", () => {",
+          "    const body = pm.response.json();",
+          "    pm.expect(body.message).to.be.a(\"string\");",
+          "    pm.expect(body.code).to.be.a(\"string\");",
+          "    pm.expect(Object.keys(body).sort()).to.eql([\"code\", \"message\"]);",
+          "  });",
+          "}"
+        ]
+      }
     }
   ]
 }
