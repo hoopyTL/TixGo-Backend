@@ -38,7 +38,7 @@ export const errorHandler: ErrorRequestHandler = (error: unknown, req, res, next
   let code = statusCode < 500 ? "REQUEST_ERROR" : "INTERNAL_ERROR";
   let message = statusCode < 500 ? "Request failed" : "Internal server error";
 
-  if (error instanceof AppError && validStatus) {
+  if (error instanceof AppError) {
     if (statusCode < 500 || (statusCode === 503 && error.code === "BOOKING_BUSY")) {
       code = error.code || defaultCodes[statusCode] || "REQUEST_ERROR";
       message = error.message;

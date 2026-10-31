@@ -215,6 +215,7 @@ describe("Application error contract", () => {
   it("returns 500 for invalid AppError statuses and hides internal AppError messages", async () => {
     const cases = [
       ...[99, 200, 600, NaN, 400.5].map((status) => [new AppError(status, "Secret status"), 500, "INTERNAL_ERROR"]),
+      [new AppError(200, "Secret status", "BOOKING_BUSY", { retryAfterSeconds: 1 }), 500, "INTERNAL_ERROR"],
       [new AppError(500, "Secret internal failure", "PRIVATE_FAILURE"), 500, "INTERNAL_ERROR"],
       [new AppError(503, "Secret unavailable failure", "PRIVATE_FAILURE"), 503, "SERVICE_UNAVAILABLE"],
     ];
@@ -226,6 +227,7 @@ describe("Application error contract", () => {
         const response = await request(server).get(`/failure/${index}`);
         contract(response, status, code);
         assert.doesNotMatch(JSON.stringify(response.body), /Secret|PRIVATE_FAILURE/);
+        assert.equal(response.headers["retry-after"], undefined);
       }
     });
   });
