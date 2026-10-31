@@ -424,10 +424,11 @@ describe("Application error contract", () => {
         await db.$disconnect();
       });
     `;
-    await execute(process.execPath, ["-e", source], {
+    const result = await execute(process.execPath, ["-e", source], {
       cwd: path.join(__dirname, ".."),
       env: { ...process.env, NODE_ENV: "production", ENABLE_TEST_UI: "false" },
       timeout: 10000,
     });
+    assert.equal(result.stderr, "", "Client input errors must not emit server error diagnostics");
   });
 });

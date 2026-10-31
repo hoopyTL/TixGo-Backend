@@ -47,19 +47,20 @@ export const errorHandler: ErrorRequestHandler = (error: unknown, req, res, next
       message = "Service unavailable";
     }
     const retryAfter = error.retryAfterSeconds;
-    if ((statusCode === 429 || statusCode === 503)
+    if ([429, 503].includes(statusCode)
       && typeof retryAfter === "number" && Number.isSafeInteger(retryAfter) && retryAfter > 0) {
       res.setHeader("Retry-After", String(retryAfter));
     }
   }
 
+  const route = typeof req.route?.path === "string" ? req.route.path : "unmatched";
   if (statusCode >= 500) {
     console.error(JSON.stringify({
       timestamp: new Date().toISOString(),
       level: "error",
       event: "http_request_failed",
       method: req.method,
-      route: typeof req.route?.path === "string" ? req.route.path : "unmatched",
+      route,
       statusCode,
       code,
     }));
