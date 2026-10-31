@@ -1,5 +1,5 @@
+import { BadRequestError } from "../errors/http-errors";
 import { z } from "zod";
-import { AppError } from "../errors/AppError";
 
 export const HoldSchema = z.object({
   eventId: z.string().uuid(), seatId: z.string().uuid(), reservationId: z.string().uuid(),
@@ -11,7 +11,7 @@ export type CreateBookingInput = z.infer<typeof CreateBookingSchema>;
 
 export function parseIdempotencyKey(value: unknown): string {
   if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(value)) {
-    throw new AppError(400, "A valid Idempotency-Key header is required");
+    throw new BadRequestError("A valid Idempotency-Key header is required");
   }
   return value;
 }

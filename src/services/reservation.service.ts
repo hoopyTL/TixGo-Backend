@@ -1,7 +1,7 @@
+import { BadRequestError, ConflictError, NotFoundError } from "../errors/http-errors";
 import { Prisma } from "@prisma/client";
 import { db } from "../configs/db";
 import { updateReservationCache } from "../configs/redis";
-import { AppError } from "../errors/AppError";
 import { HoldInput } from "../validators/booking.validator";
 import { lockCurrentActor } from "./access.service";
 import { withBookingTransaction } from "./booking-transaction";
@@ -10,7 +10,7 @@ export async function lockEvent(tx: Prisma.TransactionClient, eventId: string) {
   const [event] = await tx.$queryRaw<{ id: string; total_tickets: number; remain_tickets: number }[]>`
     SELECT id,total_tickets,remain_tickets FROM events WHERE id=${eventId} FOR UPDATE
   `;
-  if (!event) throw new AppError(404, "Event not found");
+  if (!event) throw new NotFoundError("Event not found");
   return event;
 }
 
@@ -30,10 +30,10 @@ export async function expireReservation(tx: Prisma.TransactionClient, id: string
 
 async function ownedReservation(tx: Prisma.TransactionClient, userId: string, id: string) {
   const target = await tx.reservation.findFirst({ where: { id, userId }, select: { eventId: true } });
-  if (!target) throw new AppError(404, "Reservation not found");
+  if (!target) throw new NotFoundError("Reservation not found");
   await lockEvent(tx, target.eventId);
   const reservation = await lockReservation(tx, id);
-  if (!reservation || reservation.userId !== userId) throw new AppError(404, "Reservation not found");
+  if (!reservation || reservation.userId !== userId) throw new NotFoundError("Reservation not found");
   return reservation;
 }
 
@@ -51,11 +51,11 @@ export const ReservationService = {
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`reservation:${input.reservationId}`},0))::text`;
       await lockEvent(tx, input.eventId);
       const seat = await tx.seat.findFirst({ where: { id: input.seatId, eventId: input.eventId } });
-      if (!seat) throw new AppError(404, "Seat not found for event");
+      if (!seat) throw new NotFoundError("Seat not found for event");
       const existing = await lockReservation(tx, input.reservationId);
       if (existing) {
-        if (existing.userId !== userId) throw new AppError(404, "Reservation not found");
-        if (existing.eventId !== input.eventId || existing.seatId !== input.seatId) throw new AppError(400, "Reservation payload mismatch");
+        if (existing.userId !== userId) throw new NotFoundError("Reservation not found");
+        if (existing.eventId !== input.eventId || existing.seatId !== input.seatId) throw new BadRequestError("Reservation payload mismatch");
         await expireReservation(tx, existing.id);
         const current = await tx.reservation.findUniqueOrThrow({ where: { id: existing.id } });
         return { reservation: current, cached: true, conflict: current.status !== "HELD" };
@@ -64,9 +64,9 @@ export const ReservationService = {
       if (prior) await expireReservation(tx, prior.id);
       const occupied = await tx.reservation.count({ where: { seatId: input.seatId, status: "HELD" } });
       const booked = await tx.booking.count({ where: { seatId: input.seatId, status: "CONFIRMED" } });
-      if (occupied || booked) throw new AppError(409, "Seat is unavailable", "SEAT_UNAVAILABLE");
+      if (occupied || booked) throw new ConflictError("Seat is unavailable", "SEAT_UNAVAILABLE");
       const event = await tx.event.findUniqueOrThrow({ where: { id: input.eventId } });
-      if (event.remainTickets <= 0) throw new AppError(409, "Event is sold out", "SOLD_OUT");
+      if (event.remainTickets <= 0) throw new ConflictError("Event is sold out", "SOLD_OUT");
       const [created] = await tx.$queryRaw<{ id: string }[]>`
         INSERT INTO reservations(id,user_id,event_id,seat_id,status,created_at,expires_at,updated_at)
         SELECT ${input.reservationId},${userId},${input.eventId},${input.seatId},'HELD',t,t+(${ttl()} * interval '1 second'),t
@@ -80,7 +80,7 @@ export const ReservationService = {
     if (outcome.conflict) {
       const code = outcome.reservation.status === "CONFIRMED" ? "ALREADY_CONFIRMED"
         : outcome.reservation.status === "RELEASED" ? "RESERVATION_RELEASED" : "RESERVATION_EXPIRED";
-      throw new AppError(409, "Reservation is no longer held", code);
+      throw new ConflictError("Reservation is no longer held", code);
     }
     return { data: outcome.reservation, cached: outcome.cached };
   },
@@ -100,7 +100,7 @@ export const ReservationService = {
     const reservation = await withBookingTransaction(async (tx) => {
       await lockCurrentActor(tx, userId);
       const current = await ownedReservation(tx, userId, id);
-      if (current.status === "CONFIRMED") throw new AppError(409, "Reservation was confirmed", "ALREADY_CONFIRMED");
+      if (current.status === "CONFIRMED") throw new ConflictError("Reservation was confirmed", "ALREADY_CONFIRMED");
       await expireReservation(tx, id);
       const changed = await tx.reservation.updateMany({ where: { id, status: "HELD" }, data: { status: "RELEASED" } });
       if (changed.count) await tx.event.update({ where: { id: current.eventId }, data: { remainTickets: { increment: 1 } } });
@@ -110,7 +110,7 @@ export const ReservationService = {
   },
 
   listSeats: async (eventId: string) => {
-    if (!await db.event.findUnique({ where: { id: eventId }, select: { id: true } })) throw new AppError(404, "Event not found");
+    if (!await db.event.findUnique({ where: { id: eventId }, select: { id: true } })) throw new NotFoundError("Event not found");
     return db.$queryRaw<{ id: string; eventId: string; number: number; status: string }[]>`
       SELECT s.id,s.event_id AS "eventId",s.number,
        CASE WHEN EXISTS(SELECT 1 FROM bookings b WHERE b.seat_id=s.id AND b.status='CONFIRMED') THEN 'BOOKED'

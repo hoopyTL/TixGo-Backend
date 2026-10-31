@@ -1,6 +1,6 @@
+import { BadRequestError } from "../errors/http-errors";
 import { Buffer } from "node:buffer";
 import { z } from "zod";
-import { AppError } from "../errors/AppError";
 
 export type CatalogCursor = { createdAt: Date; id: string };
 
@@ -23,6 +23,6 @@ export function decodeCatalogCursor(value: string): CatalogCursor {
     if (createdAt.toISOString() !== parsed.createdAt) throw new Error();
     return { createdAt, id: parsed.id };
   } catch {
-    throw new AppError(400, "Invalid catalog cursor");
+    throw new BadRequestError("Invalid catalog cursor");
   }
 }

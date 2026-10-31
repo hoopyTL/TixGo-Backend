@@ -3,6 +3,7 @@ import express from "express";
 import eventRouter from "./routes/event.route";
 import authRouter from "./routes/auth.route";
 import bookingRouter from "./routes/booking.route";
+import { errorHandler, notFound } from "./middlewares/error.middleware";
 
 export const app = express();
 app.disable("x-powered-by");
@@ -14,3 +15,7 @@ app.use("/bookings", bookingRouter);
 app.get("/health", (_req, res) => {
   res.json({ status: "Ok" });
 });
+
+
+app.use(notFound);
+app.use(errorHandler);

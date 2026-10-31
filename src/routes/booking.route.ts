@@ -1,3 +1,4 @@
+import { asyncHandler } from "../middlewares/error.middleware";
 import { Router } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
 import { validate } from "../middlewares/validate.middleware";
@@ -9,18 +10,18 @@ import { ReservationController } from "../controllers/reservation.controller";
 
 const router = Router();
 
-router.post("/hold", authenticate, validate(HoldSchema), ReservationController.hold);
-router.get("/holds/:id", authenticate, ReservationController.get);
-router.delete("/holds/:id", authenticate, ReservationController.release);
+router.post("/hold", authenticate, validate(HoldSchema), asyncHandler(ReservationController.hold));
+router.get("/holds/:id", authenticate, asyncHandler(ReservationController.get));
+router.delete("/holds/:id", authenticate, asyncHandler(ReservationController.release));
 
-router.get("/:id", authenticate, BookingController.getBooking);
-router.post("/:id/cancel", authenticate, validate(CancelBookingSchema), BookingController.cancelBooking);
+router.get("/:id", authenticate, asyncHandler(BookingController.getBooking));
+router.post("/:id/cancel", authenticate, validate(CancelBookingSchema), asyncHandler(BookingController.cancelBooking));
 
 router.post(
   "/",
   authenticate,
   validate(CreateBookingSchema),
-  BookingController.createBooking,
+  asyncHandler(BookingController.createBooking),
 );
 
 export default router;

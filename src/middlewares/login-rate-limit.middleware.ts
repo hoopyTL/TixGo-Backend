@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { RequestHandler, Response } from "express";
+import { NextFunction, RequestHandler } from "express";
+import { TooManyRequestsError } from "../errors/http-errors";
 
 type Window = { count: number; resetAt: number };
 
@@ -26,9 +27,9 @@ export const createLoginRateLimiter = (options: LoginRateLimitOptions = {}): Req
 
   const windows = new Map<string, Window>();
   let nextSweepAt = 0;
-  const reject = (res: Response, resetAt: number, time: number): void => {
-    res.setHeader("Retry-After", String(Math.max(1, Math.ceil((resetAt - time) / 1000))));
-    res.status(429).json({ error: "Too many login attempts. Try again later." });
+  const reject = (next: NextFunction, resetAt: number, time: number): void => {
+    const retryAfter = Math.max(1, Math.ceil((resetAt - time) / 1000));
+    next(new TooManyRequestsError("Too many login attempts. Try again later.", retryAfter));
   };
 
   return (req, res, next) => {
@@ -52,7 +53,7 @@ export const createLoginRateLimiter = (options: LoginRateLimitOptions = {}): Req
 
     const ipWindow = windows.get(ipKey);
     if (ipWindow && ipWindow.count >= ipLimit) {
-      reject(res, ipWindow.resetAt, time);
+      reject(next, ipWindow.resetAt, time);
       return;
     }
 
@@ -61,7 +62,7 @@ export const createLoginRateLimiter = (options: LoginRateLimitOptions = {}): Req
       // Do not evict active entries: eviction would let an attacker reset a budget.
       let resetAt = time + windowMs;
       for (const window of windows.values()) resetAt = Math.min(resetAt, window.resetAt);
-      reject(res, resetAt, time);
+      reject(next, resetAt, time);
       return;
     }
 
@@ -76,7 +77,7 @@ export const createLoginRateLimiter = (options: LoginRateLimitOptions = {}): Req
       if (window.count > limit) blockedUntil = Math.max(blockedUntil, window.resetAt);
     }
     if (blockedUntil) {
-      reject(res, blockedUntil, time);
+      reject(next, blockedUntil, time);
       return;
     }
     next();

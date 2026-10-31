@@ -53,8 +53,10 @@ describe("API smoke tests (no database required)", () => {
   it("rejects invalid auth payloads before database access", async () => {
     const res = await request(app).post("/auth/register").send({ email: "invalid", password: "short" });
     assert.equal(res.status, 400);
-    assert.ok(res.body.details.email);
-    assert.ok(res.body.details.password);
+    assert.deepEqual(res.body, {
+      message: "Dữ liệu không hợp lệ",
+      code: "VALIDATION_ERROR",
+    });
   });
   it("requires authentication before validating event input", async () => {
     const res = await request(app).post("/events").send({ title: "", totalTickets: -1, price: -1 });

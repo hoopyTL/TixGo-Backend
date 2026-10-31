@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { verifyToken } from "../utils/jwt";
+import { UnauthorizedError } from "../errors/http-errors";
 
 export const authenticate = (
   req: Request,
@@ -9,10 +10,7 @@ export const authenticate = (
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    res.status(401).json({
-      error: "Chưa đăng nhập",
-    });
-    return;
+    return next(new UnauthorizedError("Chưa đăng nhập"));
   }
 
   const token = authHeader.split(" ")[1];
@@ -23,10 +21,8 @@ export const authenticate = (
       throw new Error("Token is missing a valid user identity");
     }
     req.user = decodedPayload;
-    next();
-  } catch (error) {
-    res.status(401).json({
-      error: "Token không hợp lệ hoặc đã hết hạn",
-    });
+  } catch {
+    return next(new UnauthorizedError("Token không hợp lệ hoặc đã hết hạn"));
   }
+  next();
 };
