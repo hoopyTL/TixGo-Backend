@@ -11,6 +11,7 @@ const path = require("node:path");
 const { Pool } = require("pg");
 const express = require("express");
 const { readFileSync, readdirSync } = require("node:fs");
+const { assertSuccess, assertBookingReplay } = require("./helpers/success-response");
 
 let app;
 let db;
@@ -115,10 +116,10 @@ async function removeInventoryFailure() {
 async function registerUser() {
   const email = `test-${randomUUID()}@example.com`;
   const registered = await request(app).post("/auth/register").send({ email, password });
-  assert.equal(registered.status, 201, JSON.stringify(registered.body));
+  assertSuccess(registered, 201, "USER_REGISTERED");
   assert.equal(registered.body.data.passwordHash, undefined);
   const loggedIn = await request(app).post("/auth/login").send({ email, password });
-  assert.equal(loggedIn.status, 200);
+  assertSuccess(loggedIn, 200, "LOGIN_SUCCEEDED");
   return { email, token: loggedIn.body.data.accessToken, userId: registered.body.data.id };
 }
 
@@ -141,7 +142,7 @@ function postEvent(payload = eventPayload(), accessToken = organizer.token) {
 
 async function createEvent(tickets = 3) {
   const res = await postEvent(eventPayload({ totalTickets: tickets }));
-  assert.equal(res.status, 201, JSON.stringify(res.body));
+  assertSuccess(res, 201, "EVENT_CREATED");
   assert.equal(res.body.data.remainTickets, tickets);
   return res.body.data;
 }
@@ -223,6 +224,77 @@ after(async () => {
   }
 });
 
+describe("Success response contract with PostgreSQL", () => {
+  it("returns an empty catalog with a terminal cursor and no cursor header", async () => {
+    const response = await request(app).get("/events");
+    assertSuccess(response, 200, "EVENTS_RETRIEVED", ["nextCursor"]);
+    assert.deepEqual(response.body.data, []);
+    assert.equal(response.body.meta.nextCursor, null);
+    assert.equal(response.headers["x-next-cursor"], undefined);
+  });
+
+  it("wraps event, reservation and booking operations while preserving snapshots", async () => {
+    const event = await createEvent(2);
+    const updated = await patchEvent(event.id, { title: "Updated contract event" });
+    assertSuccess(updated, 200, "EVENT_UPDATED");
+    assert.equal(updated.body.data.title, "Updated contract event");
+    const listed = await request(app).get("/events");
+    assertSuccess(listed, 200, "EVENTS_RETRIEVED", ["nextCursor"]);
+    assert.equal(listed.body.data[0].id, event.id);
+    assert.equal(listed.body.meta.nextCursor, null);
+    assert.equal(listed.headers["x-next-cursor"], undefined);
+    const head = await request(app).head("/events");
+    assert.equal(head.status, 200);
+    assert.equal(head.text, undefined);
+
+    const seats = await request(app).get(`/events/${event.id}/seats`);
+    assertSuccess(seats, 200, "SEATS_RETRIEVED");
+    assert.equal(seats.body.data.length, 2);
+    const input = { eventId: event.id, seatId: seats.body.data[0].id, reservationId: randomUUID() };
+    const hold = () => request(app).post("/bookings/hold").set("Authorization", `Bearer ${token}`).send(input);
+    const startedAt = Date.now();
+    const held = await hold();
+    const retried = await hold();
+    for (const [response, status] of [[held, 201], [retried, 200]]) {
+      assertSuccess(response, status, "RESERVATION_HELD", ["serverTime"]);
+      assert.equal(new Date(response.body.meta.serverTime).toISOString(), response.body.meta.serverTime);
+      assert.ok(Date.parse(response.body.meta.serverTime) >= startedAt);
+      assert.ok(Date.parse(response.body.meta.serverTime) <= Date.now());
+    }
+    assert.deepEqual(retried.body.data, held.body.data);
+    const reservation = await request(app).get(`/bookings/holds/${input.reservationId}`)
+      .set("Authorization", `Bearer ${token}`);
+    assertSuccess(reservation, 200, "RESERVATION_RETRIEVED");
+    assert.deepEqual(reservation.body.data, held.body.data);
+
+    const key = randomUUID();
+    const confirm = () => request(app).post("/bookings").set("Authorization", `Bearer ${token}`)
+      .set("Idempotency-Key", key).send(input);
+    const created = await confirm();
+    assertBookingReplay(created, await confirm());
+    const id = created.body.data.id;
+    const booking = await bookingRequest("get", id);
+    assertSuccess(booking, 200, "BOOKING_RETRIEVED");
+    assert.equal(booking.body.data.id, id);
+    const cancelled = await bookingRequest("post", id);
+    assertSuccess(cancelled, 200, "BOOKING_CANCELLED");
+    assert.equal(cancelled.body.data.status, "CANCELLED");
+    assertBookingReplay(created, await confirm());
+    const saved = await db.idempotency.findUnique({ where: { userId_key: { userId, key } } });
+    assert.deepEqual(JSON.parse(saved.responseBody), created.body.data);
+    assert.equal(saved.responseStatus, 201);
+
+    const releaseInput = { ...input, reservationId: randomUUID() };
+    const newHold = await request(app).post("/bookings/hold")
+      .set("Authorization", `Bearer ${token}`).send(releaseInput);
+    assertSuccess(newHold, 201, "RESERVATION_HELD", ["serverTime"]);
+    const released = await request(app).delete(`/bookings/holds/${releaseInput.reservationId}`)
+      .set("Authorization", `Bearer ${token}`);
+    assert.equal(released.status, 204);
+    assert.equal(released.text, "");
+  });
+});
+
 describe("Authentication with PostgreSQL", () => {
   it("registers and logs in a user without leaking password hashes", async () => {
     const user = await registerUser();
@@ -243,8 +315,9 @@ describe("Authentication with PostgreSQL", () => {
   });
   it("returns the authenticated user's identity", async () => {
     const res = await request(app).get("/auth/me").set("Authorization", `Bearer ${token}`);
-    assert.equal(res.status, 200);
-    assert.equal(res.body.user.userId, userId);
+    assertSuccess(res, 200, "USER_RETRIEVED");
+    assert.deepEqual(res.body.data, require("jsonwebtoken").verify(token, process.env.JWT_SECRET));
+    assert.equal(res.body.data.userId, userId);
   });
   it("rejects unsupported stored roles instead of signing a token", async () => {
     const user = await registerUser();
@@ -269,7 +342,7 @@ describe("Events and booking with PostgreSQL", () => {
     const event = await createEvent();
     const res = await request(app).get("/events");
     assert.equal(res.status, 200);
-    assert.ok(res.body.some((entry) => entry.id === event.id));
+    assert.ok(res.body.data.some((entry) => entry.id === event.id));
   });
   it("creates one booking and decrements one ticket", async () => {
     const event = await createEvent();
@@ -315,7 +388,7 @@ describe("Events and booking with PostgreSQL", () => {
     assert.equal(first.status, 201);
     assert.equal(second.status, 200);
     assert.equal(second.headers["idempotent-replayed"], "true");
-    assert.deepEqual(second.body, first.body);
+    assertBookingReplay(first, second);
     assert.equal(await db.booking.count({ where: { eventId: event.id } }), 1);
     assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 0);
   });
@@ -589,7 +662,7 @@ describe("Event authorization, ownership and inventory", () => {
       if (accessToken) req = req.set("Authorization", `Bearer ${accessToken}`);
       const response = await req;
       assert.equal(response.status, 200);
-      const listed = response.body.find((entry) => entry.id === event.id);
+      const listed = response.body.data.find((entry) => entry.id === event.id);
       assert.ok(listed);
       assert.deepEqual(Object.keys(listed).sort(),
         ["id", "title", "description", "location", "totalTickets", "remainTickets", "price", "createdAt"].sort());
@@ -639,7 +712,7 @@ describe("Event authorization, ownership and inventory", () => {
     finally { client.release(true); }
     await db.seat.createMany({ data: [1, 2, 3].map((number) => ({ eventId: id, number })) });
     const catalog = await request(app).get("/events");
-    assert.ok(catalog.body.some((event) => event.id === id));
+    assert.ok(catalog.body.data.some((event) => event.id === id));
     const key = randomUUID();
     assert.equal((await book(id, key)).status, 201);
     assert.equal((await book(id, key)).status, 200);
@@ -746,9 +819,10 @@ describe("Exact prices, keyset catalog and object access control", () => {
       let req = request(app).get("/events").query({ limit: 2 });
       if (cursor) req = req.query({ cursor });
       const page = await req;
-      assert.equal(page.status, 200);
-      assert.ok(page.body.length <= 2);
-      for (const row of page.body) {
+      assertSuccess(page, 200, "EVENTS_RETRIEVED", ["nextCursor"]);
+      assert.equal(page.body.meta.nextCursor, page.headers["x-next-cursor"]);
+      assert.ok(page.body.data.length <= 2);
+      for (const row of page.body.data) {
         assert.equal(row.organizerId, undefined);
         if (ids.includes(row.id)) seen.push(row.id);
       }
@@ -835,7 +909,7 @@ describe("Exact prices, keyset catalog and object access control", () => {
     assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 1);
     const replay = await book(event.id, key);
     assert.equal(replay.status, 200);
-    assert.deepEqual(replay.body, created.body, "Creation retry remains the original cached operation snapshot");
+    assertBookingReplay(created, replay);
     assert.equal((await bookingRequest("get", id)).body.data.status, "CANCELLED");
     assert.equal((await db.event.findUnique({ where: { id: event.id } })).remainTickets, 1);
     assert.equal((await book(event.id)).status, 201);

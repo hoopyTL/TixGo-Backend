@@ -58,7 +58,7 @@ describe("Security regressions", () => {
       response.setHeader("Content-Type", "application/json");
       if (request.url === "/auth/me") return response.end("{}");
       if (request.url === "/events") {
-        return response.end(JSON.stringify([{ id: eventId, remainTickets: purchases ? 1 : 2 }]));
+        return response.end(JSON.stringify({ data: [{ id: eventId, remainTickets: purchases ? 1 : 2 }] }));
       }
       if (request.url === `/events/${eventId}/seats`) {
         return response.end(JSON.stringify({ data: [{ id: "fixture-seat", status: "AVAILABLE" }] }));

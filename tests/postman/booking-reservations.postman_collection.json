@@ -125,6 +125,34 @@
       ]
     },
     {
+      "name": "Read signed user claims",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"user claims are wrapped in data\", () => {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().code).to.eql(\"USER_RETRIEVED\");",
+              "  pm.expect(pm.response.json().data.userId).to.be.a(\"string\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/auth/me"
+      }
+    },
+    {
       "name": "Create event (set organizer_token first)",
       "request": {
         "method": "POST",
@@ -161,6 +189,34 @@
           }
         }
       ]
+    },
+    {
+      "name": "List events with cursor metadata",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"catalog uses the success envelope\", () => {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().code).to.eql(\"EVENTS_RETRIEVED\");",
+              "  pm.expect(pm.response.json().data.some(event => event.id === pm.collectionVariables.get(\"event_id\"))).to.eql(true);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/events"
+      }
     },
     {
       "name": "List seats and prepare a purchase",
@@ -619,6 +675,33 @@
           "    pm.expect(body.code).to.be.a(\"string\");",
           "    pm.expect(Object.keys(body).sort()).to.eql([\"code\", \"message\"]);",
           "  });",
+          "}",
+          "if (pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204 && pm.request.method !== \"HEAD\") {",
+          "  pm.test(\"success follows the shared contract\", () => {",
+          "    const body = pm.response.json();",
+          "    const hasMeta = [\"EVENTS_RETRIEVED\", \"RESERVATION_HELD\"].includes(body.code);",
+          "    pm.expect(Object.keys(body).sort()).to.eql([\"message\", \"code\", \"statusCode\", \"data\", ...(hasMeta ? [\"meta\"] : [])].sort());",
+          "    pm.expect(body.message).to.be.a(\"string\").and.not.empty;",
+          "    pm.expect(body.code).to.match(/^[A-Z][A-Z0-9_]*$/);",
+          "    pm.expect(body.statusCode).to.eql(pm.response.code);",
+          "    pm.expect(body.data !== null && typeof body.data === \"object\").to.eql(true);",
+          "  });",
+          "}",
+          "if (pm.response.code < 300 && pm.response.code !== 204) {",
+          "  const body = pm.response.json();",
+          "  if (body.code === \"RESERVATION_HELD\") {",
+          "    pm.test(\"hold metadata contains an ISO server time\", () => {",
+          "      pm.expect(Object.keys(body.meta)).to.eql([\"serverTime\"]);",
+          "      pm.expect(new Date(body.meta.serverTime).toISOString()).to.eql(body.meta.serverTime);",
+          "    });",
+          "  }",
+          "  if (body.code === \"EVENTS_RETRIEVED\") {",
+          "    pm.test(\"catalog cursor matches its header\", () => {",
+          "      pm.expect(body.data).to.be.an(\"array\");",
+          "      pm.expect(Object.keys(body.meta)).to.eql([\"nextCursor\"]);",
+          "      pm.expect(body.meta.nextCursor).to.eql(pm.response.headers.get(\"X-Next-Cursor\") || null);",
+          "    });",
+          "  }",
           "}"
         ]
       }

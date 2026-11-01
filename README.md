@@ -117,7 +117,24 @@ Choose an available seat, generate a reservation UUID, and send `{ eventId, seat
 
 Organizers create their own Events; admins specify an existing organizer. Event edits require owner/admin access. Booking reads/cancellations require booking owner/admin access; hold reads/releases remain owner-only. Business permissions use the current database role, while `/auth/me` returns signed token claims.
 
-Prices are decimal strings such as `"100000.00"`. The catalog returns a public array; pass `X-Next-Cursor` back as the `cursor` query parameter for the next page. PATCH does not change ownership or inventory.
+Prices are decimal strings such as `"100000.00"`. The catalog returns its public array in `data`, with `meta.nextCursor` set to the next cursor or `null` at the end. When present, `X-Next-Cursor` matches the body cursor; pass it back as the `cursor` query parameter for the next page. PATCH does not change ownership or inventory.
+
+Business success JSON responses use `{ message, code, statusCode, data }`, with optional `meta`:
+
+```json
+{
+  "message": "Booking confirmed",
+  "code": "BOOKING_CONFIRMED",
+  "statusCode": 201,
+  "data": {
+    "id": "booking-id",
+    "status": "CONFIRMED",
+    "totalPrice": "250000.00"
+  }
+}
+```
+
+`statusCode` always matches the HTTP status. Messages are English descriptions; use the stable `code` for client decisions. A booking replay returns `200` in HTTP and body, preserves the original booking snapshot, and sets `Idempotent-Replayed: true`. Hold creation/retry returns `201`/`200`, with the current ISO UTC time in `meta.serverTime` and expiry in `data.expiresAt`. `/auth/me` returns the signed claims in `data`. Successful hold release returns `204` with no body, HEAD responses have no body, and `/health` keeps `{ "status": "Ok" }`.
 
 Application errors use a shared JSON contract, including unknown routes and JSON parser failures:
 

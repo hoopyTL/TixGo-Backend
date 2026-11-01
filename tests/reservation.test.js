@@ -1,3 +1,4 @@
+const { assertBookingReplay } = require("./helpers/success-response");
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
 const { execFile } = require("node:child_process");
@@ -122,7 +123,7 @@ describe("PostgreSQL reservation lifecycle", () => {
     const replay = await f.confirm(first.input, key);
     assert.equal(replay.status, 200);
     assert.equal(replay.headers["idempotent-replayed"], "true");
-    assert.deepEqual(replay.body, created.body);
+    assertBookingReplay(created, replay);
     assert.equal((await f.invariant(event.id)).booked, 1);
     assert.equal((await f.confirm(first.input)).status, 409);
     assert.equal((await authorized(f.request().delete(`/bookings/holds/${first.input.reservationId}`))).status, 409);
@@ -217,7 +218,7 @@ describe("PostgreSQL reservation lifecycle", () => {
     assert.equal((await stored(first.input.reservationId)).status, "CONFIRMED");
     const next = await f.held(event, f.other);
     assert.equal((await f.confirm(next.input, randomUUID(), f.other)).status, 201);
-    assert.deepEqual((await f.confirm(first.input, key)).body, created.body);
+    assertBookingReplay(created, await f.confirm(first.input, key));
     assert.equal((await authorized(f.request().get(`/bookings/${id}`))).body.data.status, "CANCELLED");
     await f.service.expireBatch(100);
     assert.equal((await f.invariant(event.id)).booked, 1);
