@@ -12,7 +12,7 @@ async function api(path, options = {}) {
 async function getEvent() {
   const result = await api("/events");
   assert.equal(result.status, 200);
-  const event = result.body.find((entry) => entry.id === eventId);
+  const event = result.body.data.find((entry) => entry.id === eventId);
   assert.ok(event, "Event does not exist");
   return event;
 }
