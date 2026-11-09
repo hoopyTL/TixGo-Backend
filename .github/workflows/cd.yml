@@ -1,0 +1,221 @@
+name: Release and deploy to EC2
+
+on:
+  workflow_call:
+    secrets:
+      VPS_HOST:
+        required: true
+      VPS_USER:
+        required: true
+      VPS_SSH_KEY:
+        required: true
+
+permissions: {}
+
+jobs:
+  release:
+    name: Verify and publish images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      runtime_image: ${{ steps.publish.outputs.runtime_image }}
+      migration_image: ${{ steps.publish.outputs.migration_image }}
+      compose_sha256: ${{ steps.publish.outputs.compose_sha256 }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the verified commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install image verifier dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build amd64 images
+        run: |
+          runtime="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
+          migration="ghcr.io/${GITHUB_REPOSITORY,,}-migration:${GITHUB_SHA}"
+          docker buildx build --platform linux/amd64 --load --target runtime \
+            --build-arg "VCS_REF=$GITHUB_SHA" --tag "$runtime" .
+          docker buildx build --platform linux/amd64 --load --target migration \
+            --build-arg "VCS_REF=$GITHUB_SHA" --tag "$migration" .
+          {
+            printf 'IMAGE_REF=%s\n' "$runtime"
+            printf 'MIGRATION_IMAGE_REF=%s\n' "$migration"
+          } >> "$GITHUB_ENV"
+
+      - name: Test the exact images before publishing
+        run: npm run test:image
+
+      - name: Publish and verify both registry digests
+        id: publish
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s inherit_errexit
+          printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+          push_and_verify() {
+            local image=$1 expected_id push_output digest published
+            expected_id=$(docker image inspect --format '{{.Id}}' "$image")
+            push_output=$(docker image push "$image")
+            digest=$(sed -nE 's/^.* digest: (sha256:[0-9a-f]{64}) size: [0-9]+$/\1/p' <<< "$push_output")
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "Missing registry digest for $image" >&2
+              return 1
+            fi
+
+            published="${image%:*}@$digest"
+            docker image pull --platform linux/amd64 "$published" >&2
+            docker image inspect "$published" | jq -e --arg id "$expected_id" --arg sha "$GITHUB_SHA" '
+              .[0] | .Id == $id and .Os == "linux" and .Architecture == "amd64"
+              and .Config.Labels["org.opencontainers.image.revision"] == $sha
+            ' >/dev/null
+            printf '%s\n' "$digest"
+          }
+
+          runtime_digest=$(push_and_verify "$IMAGE_REF")
+          migration_digest=$(push_and_verify "$MIGRATION_IMAGE_REF")
+          compose_sha256=$(git show "${GITHUB_SHA}:compose.production.yml" | sha256sum | cut -d ' ' -f 1)
+          jq -n --arg commit "$GITHUB_SHA" --arg runtime_digest "$runtime_digest" \
+            --arg migration_digest "$migration_digest" --arg compose_sha256 "$compose_sha256" \
+            '{commit: $commit, runtime_digest: $runtime_digest, migration_digest: $migration_digest, compose_sha256: $compose_sha256}' \
+            > release.json
+          cat release.json >> "$GITHUB_STEP_SUMMARY"
+          {
+            printf 'runtime_image=%s@%s\n' "${IMAGE_REF%:*}" "$runtime_digest"
+            printf 'migration_image=%s@%s\n' "${MIGRATION_IMAGE_REF%:*}" "$migration_digest"
+            printf 'compose_sha256=%s\n' "$compose_sha256"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ github.run_attempt }}
+          path: release.json
+          if-no-files-found: error
+          retention-days: 30
+
+  deploy:
+    name: Deploy verified release to EC2
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
+        env:
+          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_RUN_NUMBER: ${{ github.run_number }}
+          RELEASE_RUNTIME_IMAGE: ${{ needs.release.outputs.runtime_image }}
+          RELEASE_MIGRATION_IMAGE: ${{ needs.release.outputs.migration_image }}
+          RELEASE_COMPOSE_SHA256: ${{ needs.release.outputs.compose_sha256 }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: ${{ vars.VPS_HOST_FINGERPRINT }}
+          command_timeout: 15m
+          envs: RELEASE_COMMIT,RELEASE_RUN_NUMBER,RELEASE_RUNTIME_IMAGE,RELEASE_MIGRATION_IMAGE,RELEASE_COMPOSE_SHA256
+          script: |
+            set -eu
+            umask 077
+            cd /opt/tixgo
+
+            state="$PWD/.deploy"
+            mkdir -p "$state"
+            exec 9>"$state/lock"
+            flock -n 9 || { echo 'Another deployment holds the lock.' >&2; exit 1; }
+
+            current="$state/current"
+            previous_image=
+            if [ -d "$current" ]; then
+              previous_image=$(cat "$current/image")
+              if [ "$RELEASE_RUN_NUMBER" -lt "$(cat "$current/run-number")" ]; then
+                echo 'A newer CI run is already deployed.' >&2
+                exit 1
+              fi
+            fi
+
+            candidate=$(mktemp -d "$state/release.XXXXXXXX")
+            cp compose.production.yml "$candidate/compose.yml"
+            if ! printf '%s  %s\n' "$RELEASE_COMPOSE_SHA256" "$candidate/compose.yml" | sha256sum -c --status; then
+              echo 'Sync /opt/tixgo/compose.production.yml with the release commit before retrying.' >&2
+              exit 1
+            fi
+
+            app_compose() {
+              config=$1
+              image=$2
+              shift 2
+              TIXGO_IMAGE="$image" docker compose --project-directory "$PWD" --env-file .env -f "$config" "$@"
+            }
+
+            migration() {
+              TIXGO_MIGRATION_IMAGE="$RELEASE_MIGRATION_IMAGE" \
+                app_compose "$candidate/compose.yml" "$RELEASE_RUNTIME_IMAGE" \
+                -f - run --rm --no-deps -T --interactive=false migration migrate "$1" <<'YAML'
+            services:
+              migration:
+                image: ${TIXGO_MIGRATION_IMAGE:?Set the verified migration image}
+                environment:
+                  DATABASE_URL: ${DATABASE_URL:?Set the runtime DATABASE_URL}
+            YAML
+            }
+
+            start_and_smoke() {
+              app_compose "$1" "$2" up -d --wait --wait-timeout 90 --no-deps api reservation-worker &&
+                app_compose "$1" "$2" exec -T api node -e '
+                  (async () => {
+                    for (const path of ["/health", "/events"]) {
+                      const response = await fetch("http://127.0.0.1:3000" + path, {
+                        signal: AbortSignal.timeout(5000)
+                      });
+                      if (!response.ok) throw new Error(path + " returned HTTP " + response.status);
+                      await response.body?.cancel();
+                    }
+                  })().catch((error) => { console.error(error.message); process.exitCode = 1; });
+                '
+            }
+
+            docker pull "$RELEASE_RUNTIME_IMAGE"
+            docker pull "$RELEASE_MIGRATION_IMAGE"
+            if ! migration status; then
+              approval="${previous_image:-bootstrap} $RELEASE_MIGRATION_IMAGE"
+              if ! grep -Fqx -- "$approval" "$state/approved-migrations" 2>/dev/null; then
+                echo 'Migration status requires review. Approve this migration digest for the current runtime before retrying.' >&2
+                exit 1
+              fi
+              migration deploy
+              migration status
+            fi
+
+            printf '%s\n' "$RELEASE_RUNTIME_IMAGE" > "$candidate/image"
+            printf '%s\n' "$RELEASE_RUN_NUMBER" > "$candidate/run-number"
+            printf '%s\n' "$RELEASE_COMMIT" > "$candidate/commit"
+            ln -s "$candidate" "$candidate/current-link"
+            if start_and_smoke "$candidate/compose.yml" "$RELEASE_RUNTIME_IMAGE" &&
+                mv -Tf "$candidate/current-link" "$current"; then
+              echo "Deployed $RELEASE_COMMIT ($RELEASE_RUNTIME_IMAGE)"
+            else
+              if [ -n "$previous_image" ]; then
+                echo 'Deploy failed. Restoring the last healthy runtime and Compose file.' >&2
+                start_and_smoke "$current/compose.yml" "$previous_image" || echo 'App rollback failed.' >&2
+              else
+                echo 'Deploy failed. There is no saved release to roll back to.' >&2
+              fi
+              exit 1
+            fi
