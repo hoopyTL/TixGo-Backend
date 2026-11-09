@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   backend:
@@ -70,3 +70,16 @@ jobs:
           path: artifacts/ci/
           if-no-files-found: warn
           retention-days: 14
+
+  release:
+    name: Release verified commit
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: backend
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/cd.yml
+    secrets:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
